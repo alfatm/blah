@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>blah 0.009</title>
+<script src="http://code.jquery.com/jquery-2.1.1.min.js"></script>
+<script src="http://code.jquery.com/ui/1.11.0/jquery-ui.min.js"></script>
+
+<script src="http://cdnjs.cloudflare.com/ajax/libs/sprintf/0.0.7/sprintf.min.js"></script>
+
+<script src="http://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/js/bootstrap.min.js"></script>
+<link href="http://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css" rel="stylesheet" />
+
+<script src="http://cdnjs.cloudflare.com/ajax/libs/klass/1.4.0/klass.min.js"></script>
+
+<style>
+*, body, html {
+	font-family: Verdana,"Helvetica Neue",Helvetica,Arial,sans-serif;
+}
+td, th {
+    padding: 0;
+    vertical-align: top;
+}
+#player {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+}
+#player > li {
+	margin-left: 15px;
+}
+#player > li > * {
+	display: inline-block;
+}
+#logtd {
+	width: 55%;
+	min-width: 300px;
+}
+#enemytd {
+	padding-left: 10px;
+	width: 25%;
+	min-width: 250px;
+}
+cap {
+	font-weight: bold;
+	display: inline-block;
+}
+p {
+	margin: 0;
+}
+td.val {
+	font-weight: bold;
+	padding-left: 6px;
+	padding-right: 3px;
+	min-width: 40px;
+}
+.deadenemy > td {
+	background: gray !important;
+}
+.num {
+	width: 1%;
+}
+.add, .rem {
+	margin-left: 4px;
+}
+.enemyrow {
+	width: 100%;
+}
+.enemyrow td {
+	padding: 3px;
+}
+.resurect {
+	position: absolute;
+	top: 40%;
+	left: 40%;
+	z-index: 999;
+	font-size: 20px;
+	margin: auto 0;
+	padding: 0 10px 0 10px;
+	width:  auto;;
+}
+</style>
+<script>
+function getRandomArbitrary(min, max) {
+    return Math.random() * (max - min) + min;
+}
+
+function getRandomInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function getRandomFloat(min, max) {
+    return (Math.random() * (max - min + 1)) + min;
+}
+
+var deploy = {
+	mobs : [
+		{ name : "Эфирная мышь", type : 'mob', reward : { exp: 5, gold: 15 }, attrs : { agi : 2, str : 1.2, vit : 1.5, lak : 3 }, chance: 40},
+		{ name : "Боевой таракан", type : 'mob', reward : { exp: 7, gold: 20 }, attrs : { agi : 1.4, str : 3, vit : 2 }, chance: 40 },
+		{ name : "Пукано-рватель", type : 'boss', reward : { exp: 15, gold: 50 }, attrs : { agi : 5, str : 6, vit : 6 }, chance: 5 },
+	],
+}
+
+var World = klass(function(data) {
+	this.player = null;
+	this.enemys = {};
+	this.dead = {};
+	this.logsize = 1000;
+	this.mobcnt = 0;
+	this.level = 1;
+	this.fps = 20;
+	this.startTime = $.now();
+	this.savePeriod = 30; //sec
+	this.saveTime = $.now();
+	this.time = this.startTime;
+	$.extend(this, data)
+})
+.statics({
+})
+.methods({
+	loop : function() {
+		this.onStart();
+		if (this.loopId) {
+			clearInterval(this.loopId);
+		}
+		var self = this;
+		this.loopId = window.setInterval(function() {
+			self.update();
+		}, 1000/this.fps);
+		return this;
+	},
+
+	update : function() {
+		var time = $.now();
+		if (time < this.time) {
+			// нельзя тикать назад
+			return;
+		}
+
+		// if (this.waitTill && time < this.waitTill) {
+		// 	// ждём когда можно начать тикать
+		// 	return;
+		// }
+
+		var frame = 1000/this.fps;
+		var dt = time - this.time;
+		var fp = Math.floor(dt/frame);
+		// if (fp < 1) {
+		// 	// console.log('пропускаем фрейм', time, this, fp);
+		// 	return;
+		// }
+
+		// if (fp > 100) {
+		// 	console.log('время, не беги так быстро', time, this);
+		// 	// игра будет ждать время на переод аномального скачка
+		// 	this.waitTill = this.time + fp*frame
+		// 	return;
+		// }
+
+		this.fp = fp;
+		this.dt = dt;
+		this.time = time
+
+		if (this.player) {
+			this.player.onUpdate(this);
+		}
+
+		if (this.enemys) {
+			for (var key in this.enemys) { 
+				var enemy = this.enemys[key];
+				enemy.onUpdate(this);
+			}
+		}
+
+		if (this.dead) {
+			for (var key in this.dead) { 
+				var enemy = this.dead[key];
+				enemy.onUpdate(this);
+			}
+		}
+
+		this.save();
+	},
+
+	log : function(message) {
+		// текущее время
+		var date = new Date(this.time);
+		var datestr = sprintf("%s.%03d", date.toLocaleTimeString(), date.getMilliseconds()); 
+
+		var $loglist = $('#loglist');
+		$loglist.prepend("<tr><td>"+datestr+"</td><td>"+message+"</td></tr>");
+
+		// удалять старые логи
+		var len = $('tr', $loglist).length;
+		for (var i = 0; i < len - this.logsize; i++) {
+			$('tr', $loglist).last().remove();
+		}
+	},
+
+	save : function() {
+		if (this.time - this.saveTime < this.savePeriod) {
+			return;
+		}
+
+		var data = {};
+		// 1) параметры мира, кроме таймеров
+		// 2) сохранить самого игрока
+		// 3) сохрнать мобов
+		// 4) сохранить последние 100 записей из лога
+	},
+
+	load : function() {
+		// тут развернуть
+	},
+
+	onStart : function() {
+		// загрузить данные по миру и заполнить если надо
+		//TODO
+
+		// игрок
+		this.spawnPlayer();
+
+		// контролы:
+		// кнопка спавна мобов
+		var self = this;
+		$('#addenemy').click(function(e) {
+			var chance = 0;
+			for (key in deploy.mobs) {
+				var mob = deploy.mobs[key];
+				chance += mob.chance;
+			}
+
+			var roll = getRandomFloat(0, chance);
+			var r = 0;
+			var found = null;
+			for (key in deploy.mobs) {
+				var mob = deploy.mobs[key];
+				r = r + mob.chance;
+				if (r >= roll) {
+					found = key;
+					break;
+				}
+			}
+
+			if (!found) {
+				return;
+			}
+
+			self.spawnMob(found);
+		});
+
+		$('#addenemylvl').click(function(e) {
+			var val = 1;
+			if (e.shiftKey) {
+				val *= 10;
+			}
+			self.level = Math.max(1, self.level+val);
+			$('#worldlevel').text(self.level);
+		});
+
+		$('#remenemylvl').click(function(e) {
+			var val = -1;
+			if (e.shiftKey) {
+				val *= 10;
+			}
+			self.level = Math.max(1, self.level+val);
+			$('#worldlevel').text(self.level);
+		});
+
+		$(document).on('click', '.choisenemy', function(e) {
+			var $that = $(this);
+			var $enemyrow = $(this).closest('.enemyrow');
+			var id = parseInt($enemyrow.attr('enemyid'));
+			var enemy = $.world.enemys[id];
+			if (!enemy) {
+				enemy = $.world.dead[id];
+			}
+			if (!enemy) {
+				return;
+			}
+
+			enemy.targeted = !enemy.targeted;
+			if (enemy.targeted) {
+				$that.addClass('btn-success');
+				$that.removeClass('btn-default');
+			} else {
+				$that.addClass('btn-default');
+				$that.removeClass('btn-success');
+			}
+		});
+	},
+
+	spawnPlayer : function() {
+		if ($.world.player) {
+			alert('Игрок уже загружен');
+		}
+
+		// TODO тянем из локал сторейджа
+
+		var player = new Player({
+			name : 'Падаван',
+			tag : '#player',
+			// skillPoints : 200,
+			skillPoints : 20,
+		});
+		player.spawn();
+	},
+
+	spawnMob : function(mobId) {
+		var tpl = deploy.mobs[mobId];
+		var index = ++$.world.mobcnt;
+		var mob = new Mob({
+			id : index,
+			tag : '#enemy' + index,
+			tplId : index,
+			name : tpl.name,
+			type : tpl.type,
+		});
+
+		mob.reward = {
+			gold : Math.ceil(tpl.reward.gold * $.world.level),
+			exp : Math.ceil(tpl.reward.exp * $.world.level),
+		};
+
+		for (attr in tpl.attrs) {
+			var val = tpl.attrs[attr] * $.world.level;
+			var roll = getRandomInt(val-val/10, val+val/10);
+			mob.setAttr(attr, roll);
+		}
+		mob.spawn();
+	},
+});
+
+var Mob = klass(function(data) {
+	this.reset()
+	$.extend(this, data)
+})
+.methods({
+	reset : function() {
+		this.id = 0;
+		this.tag = '#enemy0';
+	  	this.type = 'mob';
+	  	this.name = 'Я моб, у которого нет имени';
+
+	  	this.reward = null;
+	  	this.skillPoints = 0;
+		this.attrMin = 1;
+		this.attrMax = 1000000;
+		this.hp = 0;
+		this.exp = 0;
+		this.dead = false;
+		this.level = 1;
+		this.gold = 0;
+		this.lastAttack = $.world.time;
+		this.lastRegen = 0;
+		this.attackMaxCnt = 10;//hits
+		this.corpsRemoveTime = 100;//sec
+		this.kills = 0;
+		this.death = 0;
+		this.nodes = {};
+
+		this.setAttr('str', 1);
+		this.setAttr('vit', 1);
+		this.setAttr('agi', 1);
+		this.setAttr('lak', 1); // lack
+		this.setAttr('mst', 1); // mastery
+	},
+
+	getNode : function(str, reset) {
+		// функция про кэширование поиска элементов на странице
+		if (!reset && this.nodes[str] != undefined) {
+			return this.nodes[str];
+		}
+
+		var found;
+		if (!str || str.length == 0){
+			found = $(this.tag);
+		} else {
+			found = $(str, this.tag);
+		}
+
+		if (!found || found.length == 0) {
+			return found;
+		}
+
+		this.nodes[str] = found;
+		return found;
+	},
+
+	resetNode : function() {
+		this.nodes = {};
+	},
+
+	spawn : function() {
+		this.recalc(0);
+		this.regen(0);
+
+		$tr = $('<tr>');
+		$tr.addClass('enemyrow');
+		$tr.attr('id', 'enemy'+this.id);
+		$tr.attr('enemyid', this.id);
+		var $btn = '<button class="btn btn-xs btn-default choisenemy" title="Атаковать эту цель">+</button>';
+		$tr.append(sprintf('<td><div class=target>%s</div></td>', $btn));
+		$tr.append(sprintf('<td><div class=num>%s</div></td>', this.id));
+		$tr.append(sprintf('<td><div class=type>%s</div></td>', this.type));
+		$tr.append(sprintf('<td><div class=level>%s</div></td>', this.level));
+		$tr.append(sprintf('<td><div class=ap>%.2f/%.2f</div></td>', this.dmgMin, this.dmgMax));
+		$tr.append(sprintf('<td><div class=hp>%d/%d</div></td>', this.hp, this.hpMax));
+		$tr.append(sprintf('<td><div class=name>%s</div></td>', this.name));
+		$('#enemylist').prepend($tr);
+
+		$.world.enemys[this.id] = this;
+		this.redraw();
+		this.onSpawn();
+	},
+
+	addAttr : function(attr, val) {
+		return this.setAttr(attr, this.getAttr(attr) + val);
+	},
+
+	getAttr : function(attr) {
+		return this[attr];
+	},
+
+	checkAttr : function(attr, val) {
+		return Math.min(this.attrMax, Math.max(this.attrMin, Math.floor(val)));
+	},
+
+	setAttr : function(attr, val) {
+		var prev = this.getAttr(attr,val);
+		this[attr] = this.checkAttr(attr, val);
+		this.onAttrChange(attr, val, prev);
+		return this[attr];
+	},
+
+	onAttrChange : function(attr, val, prev) {
+	},
+
+	regen : function(time) {
+		var dt = time?time:$.world.time-this.lastRegen;
+		if (this.dead || this.hpRegenTick > dt) {
+			return false;
+		}
+
+		var st = Math.floor(dt/this.hpRegenTick);
+		var oldhp = this.hp;
+		this.hp = Math.min(this.hpMax, this.hp + st*this.hpRegen);
+		this.lastRegen = this.lastRegen + st*this.hpRegenTick;
+		if (oldhp != this.hp) {
+			this.redraw();
+		}
+	},
+
+	hit : function() {
+		var crit = this.crit >= getRandomFloat(0,100) ? 2 : 1; 
+		return {
+			damage: getRandomInt(this.dmgMin, this.dmgMax) * crit,
+			crit : crit,
+		}
+	},
+
+	check : function() {
+		this.setAttr('str', this.str );
+		this.setAttr('vit', this.vit );
+		this.setAttr('agi', this.agi );
+		this.setAttr('lak', this.lak );
+		this.setAttr('mst', this.mst );
+	},
+
+	recalc : function(time) {
+		this.check();
+		this.hpMax = 10 * this.vit;
+		this.hpRegen = 0.01 * this.hpMax;
+		this.hpRegenTick = 500;
+		this.dmgMin = 0.1 * this.str;
+		this.dmgMax = 0.25 * this.str;
+		this.aspd = Math.min(10, this.agi*0.1);
+		this.crit = 0.5 * this.lak;
+		this.def = 0;
+		var skillcnt = this.getAttr('str')
+					 + this.getAttr('vit')
+					 + this.getAttr('agi')
+					 + this.getAttr('lak')
+					 + this.getAttr('mst');
+
+		this.level = Math.floor(skillcnt / 5);
+		if (time < this.lastAttack) {
+			this.lastAttack = $.world.time;
+		}
+	},
+
+	rollEnemy : function(cnt) {
+		if ($.world.player && !$.world.player.dead) {
+			return $.world.player;
+		}
+	},
+
+	attack : function() {
+		var dt = $.world.time-this.lastAttack;
+		var ac = 1000/this.aspd;
+		if (this.dead || ac > dt) {
+			return false;
+		}
+
+		this.lastAttack = $.world.time;
+		var at = Math.min(this.attackMaxCnt, Math.floor(dt/ac)); 
+		for (var i = 0; i < at; i++) {
+			var enemy = this.rollEnemy();
+			if (enemy && !enemy.dead) {
+				var hit = this.hit();
+				enemy.onHit(this, hit);
+				if (enemy.dead) {
+					this.onKill(enemy, hit)
+				}
+			}
+		}
+	},
+
+	redraw : function() {
+		if (!this.tag) {
+			return;
+		}
+		this.getNode('.type').text(this.type);
+		this.getNode('.level').text(this.level);
+		this.getNode('.ap').text(sprintf("%.2f - %.2f", this.dmgMin, this.dmgMax));
+		this.getNode('.hp').text(sprintf("%d/%d", this.hp, this.hpMax));
+		this.getNode('.name').text(this.name);
+	},
+
+	resurect: function() {
+		this.hp = this.hpMax;
+		this.dead = false;
+		$('#resurect').hide();
+		this.redraw();
+	},
+
+	onUpdate : function() {
+		if (this.dead) {
+			if ($.world.time - this.deadTime > this.corpsRemoveTime*1000) {
+				$(this.tag).remove();
+			}
+			return;
+		}
+
+		// this.regen();
+		this.attack();
+	},
+
+	onHit : function(enemy, hit) {
+		this.hp = Math.max(0, this.hp - hit.damage);
+
+		this.getNode('.hp').finish().filter(':not(:animated)').effect("highlight", { color : 'red' }, 1000/enemy.aspd);
+		var critText = '';
+		if (hit.crit && hit.crit>1) {
+		 	critText = ' (крит!)';
+		}
+		$.world.log(sprintf("<b>%s</b> атаковал <b>%s</b> на %.2f урона %s", enemy.name, this.name, hit.damage, critText));
+		this.redraw();
+
+		if (this.hp < 1) {
+			this.onDead(enemy, hit);
+		}
+	},
+
+	onKill : function() {
+		// моб мог бы левелапаться если побеждает игрока, или наоборот слабеть что б игрок мог его всётаки победить
+	},
+
+	onDead : function() {
+		$.world.log(sprintf('Побеждён %s %d уровня, награда %d опыта и %d золота', this.name, this.level, this.reward.exp, this.reward.gold));
+		this.getNode().addClass('deadenemy');
+		this.hp = 0;
+		this.dead = true;
+		this.deadTime = $.world.time;
+		$.world.dead[this.id] = this;
+		delete $.world.enemys[this.id];
+	},
+
+	onSpawn : function() {
+		$.world.log('В подземелье спустился '+this.name+', '+this.level+' уровня');
+	},
+
+    // walk: function () {}
+});
+
+var Player = Mob.extend(function(data) {
+	var self = this;
+	$('.stat .add', self.tag).click(function(e) {
+		var val = 1;
+		var attr = $(this).closest('tr').attr('attr');
+		if (e.shiftKey) {
+			val *= 10;
+		}
+		self.setSkill(attr, val)
+		self.redraw();
+	});
+
+	$('.stat .rem', self.tag).click(function(e) {
+		var val = -1;
+		var attr = $(this).closest('tr').attr('attr');
+		if (e.shiftKey) {
+			val *= 10;
+		}
+		self.setSkill(attr, val)
+		self.redraw();
+	});
+
+	$('#resurect').click(function(e) {
+		$.world.player.resurect();
+	});
+
+	this.factor = 1;
+})
+.methods({
+	spawn : function() {
+		$.world.player = this;
+		this.recalc(0);
+		this.regen(0);
+		this.redraw();
+		this.onSpawn();
+	},
+
+	addExp : function(level, val) {
+		this.exp += val;
+		while(true) {
+			var step = Math.floor(Math.pow(this.factor, 4)*10 - 9);
+			if (this.exp < step) {
+				break;
+			}
+			this.factor += 1;
+			this.skillPoints += 5;
+		}
+	},
+
+	setSkill : function(attr, val) {
+		if (!attr || val == 0) {
+			return;
+		}
+
+		var attrval = this.getAttr(attr);
+		var attrset = this.checkAttr(attr, attrval + val);
+		var delta = attrset - attrval;
+		if (this.skillPoints < delta) { // нехватает поинтов
+			delta = this.skillPoints;
+		}
+
+		this.skillPoints -= delta;
+		this.addAttr(attr, delta);
+		this.recalc();
+	},
+
+	rollEnemy : function() {
+		var targets = 0;
+		for (key in $.world.enemys) {
+			var enemy = $.world.enemys[key];
+			if (enemy.targeted) {
+				targets += 1;
+			}
+		}
+
+		if (targets > 0) {
+			var pos = getRandomInt(0, targets-1);
+			var i = 0;
+			for (key in $.world.enemys) {
+				var enemy = $.world.enemys[key];
+				if (enemy.targeted) {
+					if (i == pos) {
+						return enemy;
+					} 
+					i++;
+				}
+			}
+		} else {
+			var len = Object.keys($.world.enemys).length;
+			var pos = getRandomInt(0, len-1);
+			var i = 0;
+			for (key in $.world.enemys) {
+				if (i == pos) {
+					return $.world.enemys[key];
+				}
+				i++;
+			}
+		}
+	},
+
+	redraw : function() {
+		this.getNode('.level').text(this.level);
+		this.getNode('.exp').text(this.exp);
+		this.getNode('.gold').text(this.gold);
+		this.getNode('.skillPoints').text(this.skillPoints);
+		this.getNode('.hp').text(sprintf("%d/%d", this.hp, this.hpMax));
+		this.getNode('.name').val(this.name);
+		this.getNode('.atmin').text(sprintf("%.2f", this.dmgMin));
+		this.getNode('.atmax').text(sprintf("%.2f", this.dmgMax));
+		this.getNode('.aspd').text(sprintf("%.2f", this.aspd));
+		this.getNode('.def').text(this.def);
+		this.getNode('.crit').text(sprintf("%.2f", this.crit));
+		this.getNode('.kills').text(this.kills);
+		this.getNode('.death').text(this.death);
+
+		this.getNode('[attr=str] > .val').text(this.str);
+		this.getNode('[attr=vit] > .val').text(this.vit);
+		this.getNode('[attr=agi] > .val').text(this.agi);
+		this.getNode('[attr=lak] > .val').text(this.lak);
+		this.getNode('[attr=mst] > .val').text(this.mst);
+	},
+
+	onUpdate : function() {
+		this.regen();
+		this.attack();
+	},
+
+	onSpawn : function() {
+		$.world.log('Герой вошёл в этот мир. '+this.name+', '+this.level+' уровня');
+	},
+
+	onKill : function(enemy, hit) {
+		if (enemy && enemy.reward) {
+			if (enemy.reward.exp) {
+				this.addExp('level', enemy.reward.exp);
+			}
+
+			if (enemy.reward.gold) {
+				this.gold += enemy.reward.gold;
+			}
+		}
+		this.kills += 1;
+		this.redraw()
+	},
+
+	onDead : function() {
+		$.world.log('Побеждён '+this.name+', '+this.level+' уровня');
+		this.dead = true;
+		this.deadTime = $.world.time;
+		this.death += 1;
+		$('#resurect').show();
+		this.redraw();
+	},
+});
+
+$(document).ready(function() {
+	$.world = new World({});
+	$.world.loop();
+});
+</script>
+</head>
+<body>
+<div class="row clearfix">
+	<div class="col-md-2 column ui-sortable">
+		<h4>Игрок</h4>
+		<ul id=player>
+			<!--
+ 			<li>
+				<cap>Имя: </cap>
+				<input type=text class="name" />
+			</li>
+			 -->
+			<li>
+				<cap>Уровень: </cap>
+				<div class="level"> </div>
+			</li>
+			<li>
+				<cap>Опыт: </cap>
+				<div class="exp"> </div>
+			</li>
+			<li>
+				<cap>Деньги : </cap>
+				<div class="gold"> </div>
+			</li>
+			<hr />
+			<li>
+				<cap>Жизни: </cap>
+				<div class="hp"> </div>
+			</li>
+			<hr />
+			<li>
+				<cap>Скилы: </cap>
+				<div class="skillPoints"> </div>
+			</li>
+			<li>
+			<table class="stat">
+				<tr attr="str">
+					<td><cap>Стр:</cap></td>
+					<td class="val">1</td>
+					<td>&nbsp;</td>
+					<td><input type=button value="+" class="btn btn-primary btn-xs add" /></td>
+					<td><input type=button value="-" class="btn btn-warning btn-xs rem" /></td>
+				</tr>
+				<tr attr="vit">
+					<td><cap>Вит:</cap></td>
+					<td class="val">1</td>
+					<td>&nbsp;</td>
+					<td><input type=button value="+" class="btn btn-primary btn-xs add" /></td>
+					<td><input type=button value="-" class="btn btn-warning btn-xs rem" /></td>
+				</tr>
+				<tr attr="agi">
+					<td><cap>Аги:</cap></td>
+					<td class="val">1</td>
+					<td>&nbsp;</td>
+					<td><input type=button value="+" class="btn btn-primary btn-xs add" /></td>
+					<td><input type=button value="-" class="btn btn-warning btn-xs rem" /></td>
+				</tr>
+				<tr attr="lak">
+					<td><cap>Лак:</cap></td>
+					<td class="val">1</td>
+					<td>&nbsp;</td>
+					<td><input type=button value="+" class="btn btn-primary btn-xs add" /></td>
+					<td><input type=button value="-" class="btn btn-warning btn-xs rem" /></td>
+				</tr>
+				<tr attr="mst">
+					<td><cap>Мст:</cap></td>
+					<td class="val">1</td>
+					<td>&nbsp;</td>
+					<td><input type=button value="+" class="btn btn-primary btn-xs add" /></td>
+					<td><input type=button value="-" class="btn btn-warning btn-xs rem" /></td>
+				</tr>
+			</table>
+			</li>
+			<hr />
+			<li>
+				<cap>Атака: </cap>
+				<span class="atmin"> </span> - <span class="atmax"> </span>
+			</li>
+			<li>
+				<cap>ASPD: </cap>
+				<div class="aspd"> </div>
+			</li>
+			<li>
+				<cap>Защита: </cap>
+				<div class="def"> </div>
+			</li>
+			<li>
+				<cap>Крит: </cap>
+				<div class="crit"> </div>
+			</li>
+			<hr />
+			<li>
+				<cap>Убито монстров: </cap>
+				<div class="kills"> </div>
+			</li>
+			<li>
+				<cap>Смертей: </cap>
+				<div class="death"> </div>
+			</li>
+			<hr />
+			<center><button id="resurect" class="btn btn-primary" style="display:none">Воскресить</button></center>
+		</ul>
+
+		<center><h6> Blah v 0.009 </h6></center>
+	</div>
+	<div class="col-md-6 column ui-sortable">
+		<h4>События</h4>
+		<table id=loglist class="table table-striped table-hover ">
+		</table>
+	</div>
+	<div class="col-md-4 column ui-sortable">
+		<h4>Уровень подземелья (LVL: <span id="worldlevel">1</span>)</h4>
+		<button class="btn btn-primary btn-xs" id=addenemy>Добавить врага</button>
+		<button class="btn btn-primary btn-xs" id=addenemylvl>+</button>
+		<button class="btn btn-warning btn-xs" id=remenemylvl>-</button>
+		<table id=enemylist class="table table-striped">
+			<thead>
+			<tr id='dummy' class="enemyrow">
+				<!-- <td>номер</td> -->
+				<th class="target"></th>
+				<th class="num">#</th>
+				<th class="type">тип</th>
+				<th class="level">уровень</th>
+				<th class="ap">атака</th>
+				<th class="hp">жизни</th>
+				<th class="name">имя</th>
+			</tr>
+			</thead>
+ 		</table>
+	</div>
+</div>
+</body>
+</html>
