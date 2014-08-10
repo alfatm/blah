@@ -41,6 +41,12 @@ td, th {
 	width: 25%;
 	min-width: 250px;
 }
+.enemyname {
+	color:#BA2500;
+}
+.playername {
+	color:#006282;
+}
 cap {
 	font-weight: bold;
 	display: inline-block;
@@ -108,11 +114,17 @@ var World = klass(function(data) {
 	this.logsize = 1000;
 	this.mobcnt = 0;
 	this.level = 1;
+
+	// loop
 	this.fps = 20;
-	this.startTime = $.now();
-	this.savePeriod = 30; //sec
-	this.saveTime = $.now();
-	this.time = this.startTime;
+	this.startTime = $.now(); // время сздания игры
+	this.utime = this.startTime; // время последнего тика
+	this.time = 0; // внутренне время мира
+	this.ptime = 0; // предыдущий тик
+
+	// сохранения мира
+	this.savePeriod = 60*1000; // milisec
+	this.saveTime = this.savePeriod
 	$.extend(this, data)
 })
 .statics({
@@ -132,43 +144,35 @@ var World = klass(function(data) {
 
 	update : function() {
 		var time = $.now();
-		if (time < this.time) {
+		if (time < this.utime) {
 			// нельзя тикать назад
 			return;
 		}
 
-		// if (this.waitTill && time < this.waitTill) {
-		// 	// ждём когда можно начать тикать
-		// 	return;
-		// }
+		var dt = time - this.utime;
+		var fp = Math.floor(dt/this.fps);
 
-		var frame = 1000/this.fps;
-		var dt = time - this.time;
-		var fp = Math.floor(dt/frame);
-		// if (fp < 1) {
-		// 	// console.log('пропускаем фрейм', time, this, fp);
-		// 	return;
-		// }
+		// для очень лагучих миров
+		if (dt > 2000) {
+			dt = 2000;
+			// console.log('время, не беги так быстро', this);
+		}
 
-		// if (fp > 100) {
-		// 	console.log('время, не беги так быстро', time, this);
-		// 	// игра будет ждать время на переод аномального скачка
-		// 	this.waitTill = this.time + fp*frame
-		// 	return;
-		// }
-
-		this.fp = fp;
 		this.dt = dt;
-		this.time = time
+		this.utime = time;
+		this.ptime = this.time
+		this.time += dt;
 
 		if (this.player) {
 			this.player.onUpdate(this);
+			this.player.onLate(this);
 		}
 
 		if (this.enemys) {
 			for (var key in this.enemys) { 
 				var enemy = this.enemys[key];
 				enemy.onUpdate(this);
+				enemy.onLate(this);
 			}
 		}
 
@@ -176,19 +180,23 @@ var World = klass(function(data) {
 			for (var key in this.dead) { 
 				var enemy = this.dead[key];
 				enemy.onUpdate(this);
+				enemy.onLate(this);
 			}
 		}
 
-		this.save();
+		this.trySave();
 	},
 
 	log : function(message) {
+		var arg = Array.splice(arguments, 0);
+		var msg = sprintf.apply(null, arg);
+
 		// текущее время
-		var date = new Date(this.time);
+		var date = new Date($.world.utime);
 		var datestr = sprintf("%s.%03d", date.toLocaleTimeString(), date.getMilliseconds()); 
 
 		var $loglist = $('#loglist');
-		$loglist.prepend("<tr><td>"+datestr+"</td><td>"+message+"</td></tr>");
+		$loglist.prepend("<tr><td>"+datestr+"</td><td>"+msg+"</td></tr>");
 
 		// удалять старые логи
 		var len = $('tr', $loglist).length;
@@ -197,11 +205,14 @@ var World = klass(function(data) {
 		}
 	},
 
-	save : function() {
+	trySave : function() {
 		if (this.time - this.saveTime < this.savePeriod) {
 			return;
 		}
+		this.save();
+	},
 
+	save : function() {
 		var data = {};
 		// 1) параметры мира, кроме таймеров
 		// 2) сохранить самого игрока
@@ -213,13 +224,7 @@ var World = klass(function(data) {
 		// тут развернуть
 	},
 
-	onStart : function() {
-		// загрузить данные по миру и заполнить если надо
-		//TODO
-
-		// игрок
-		this.spawnPlayer();
-
+	bind : function() {
 		// контролы:
 		// кнопка спавна мобов
 		var self = this;
@@ -288,6 +293,16 @@ var World = klass(function(data) {
 				$that.removeClass('btn-success');
 			}
 		});
+
+		// кнопка резета
+		// кнопка сохранения ручного
+	},
+
+	onStart : function() {
+		this.bind();
+
+		// игрок
+		this.spawnPlayer();
 	},
 
 	spawnPlayer : function() {
@@ -303,6 +318,7 @@ var World = klass(function(data) {
 			// skillPoints : 200,
 			skillPoints : 20,
 		});
+		player.preper();
 		player.spawn();
 	},
 
@@ -327,6 +343,7 @@ var World = klass(function(data) {
 			var roll = getRandomInt(val-val/10, val+val/10);
 			mob.setAttr(attr, roll);
 		}
+		mob.preper();
 		mob.spawn();
 	},
 });
@@ -366,6 +383,10 @@ var Mob = klass(function(data) {
 		this.setAttr('mst', 1); // mastery
 	},
 
+	getName : function(gender, tens) {
+		return sprintf("<b class=enemyname>%s #%d</b>", this.name, this.id);
+	},
+
 	getNode : function(str, reset) {
 		// функция про кэширование поиска элементов на странице
 		if (!reset && this.nodes[str] != undefined) {
@@ -391,10 +412,14 @@ var Mob = klass(function(data) {
 		this.nodes = {};
 	},
 
-	spawn : function() {
-		this.recalc(0);
-		this.regen(0);
+	preper : function() { // функция вызывается при создании
+		this.recalc();
+		this.regen();
+		this.hp = this.hpMax;
+		this.lastAttack = $.world.time;
+	},
 
+	spawn : function() {
 		$tr = $('<tr>');
 		$tr.addClass('enemyrow');
 		$tr.attr('id', 'enemy'+this.id);
@@ -437,7 +462,7 @@ var Mob = klass(function(data) {
 	},
 
 	regen : function(time) {
-		var dt = time?time:$.world.time-this.lastRegen;
+		var dt = $.world.time-this.lastRegen;
 		if (this.dead || this.hpRegenTick > dt) {
 			return false;
 		}
@@ -467,7 +492,7 @@ var Mob = klass(function(data) {
 		this.setAttr('mst', this.mst );
 	},
 
-	recalc : function(time) {
+	recalc : function() {
 		this.check();
 		this.hpMax = 10 * this.vit;
 		this.hpRegen = 0.01 * this.hpMax;
@@ -484,9 +509,6 @@ var Mob = klass(function(data) {
 					 + this.getAttr('mst');
 
 		this.level = Math.floor(skillcnt / 5);
-		if (time < this.lastAttack) {
-			this.lastAttack = $.world.time;
-		}
 	},
 
 	rollEnemy : function(cnt) {
@@ -542,8 +564,12 @@ var Mob = klass(function(data) {
 			return;
 		}
 
-		// this.regen();
+		// this.regen(); // Регенерация мобов
 		this.attack();
+	},
+
+	onLate: function() {
+
 	},
 
 	onHit : function(enemy, hit) {
@@ -554,7 +580,7 @@ var Mob = klass(function(data) {
 		if (hit.crit && hit.crit>1) {
 		 	critText = ' (крит!)';
 		}
-		$.world.log(sprintf("<b>%s</b> атаковал <b>%s</b> на %.2f урона %s", enemy.name, this.name, hit.damage, critText));
+		$.world.log("<b>%s</b> атаковал <b>%s</b> на %.2f урона %s", enemy.getName(), this.getName(), hit.damage, critText);
 		this.redraw();
 
 		if (this.hp < 1) {
@@ -567,7 +593,7 @@ var Mob = klass(function(data) {
 	},
 
 	onDead : function() {
-		$.world.log(sprintf('Побеждён %s %d уровня, награда %d опыта и %d золота', this.name, this.level, this.reward.exp, this.reward.gold));
+		$.world.log('Побеждён %s %d уровня, награда %d опыта и %d золота', this.getName(), this.level, this.reward.exp, this.reward.gold);
 		this.getNode().addClass('deadenemy');
 		this.hp = 0;
 		this.dead = true;
@@ -577,7 +603,7 @@ var Mob = klass(function(data) {
 	},
 
 	onSpawn : function() {
-		$.world.log('В подземелье спустился '+this.name+', '+this.level+' уровня');
+		$.world.log('В подземелье спустился %s, %d уровня', this.getName(), this.level);
 	},
 
     // walk: function () {}
@@ -612,10 +638,13 @@ var Player = Mob.extend(function(data) {
 	this.factor = 1;
 })
 .methods({
+
+	getName : function(gender, tens) {
+		return sprintf("<b class=playername>%s</b>", this.name);
+	},
+
 	spawn : function() {
 		$.world.player = this;
-		this.recalc(0);
-		this.regen(0);
 		this.redraw();
 		this.onSpawn();
 	},
@@ -711,7 +740,7 @@ var Player = Mob.extend(function(data) {
 	},
 
 	onSpawn : function() {
-		$.world.log('Герой вошёл в этот мир. '+this.name+', '+this.level+' уровня');
+		$.world.log('Герой вошёл в этот мир. %s, %d уровня', this.getName(), this.level);
 	},
 
 	onKill : function(enemy, hit) {
@@ -729,7 +758,7 @@ var Player = Mob.extend(function(data) {
 	},
 
 	onDead : function() {
-		$.world.log('Побеждён '+this.name+', '+this.level+' уровня');
+		$.world.log('Побеждён %s, %d уровня', this.name, this.level);
 		this.dead = true;
 		this.deadTime = $.world.time;
 		this.death += 1;
