@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>blah 0.011</title>
+<title>blah 0.012</title>
 <script src="http://code.jquery.com/jquery-2.1.1.min.js"></script>
 <script src="http://code.jquery.com/ui/1.11.0/jquery-ui.min.js"></script>
 
@@ -40,6 +40,10 @@ td, th {
 	padding-left: 10px;
 	width: 25%;
 	min-width: 250px;
+}
+#resurect, #saveworld, #wipeworld {
+	margin:  5px;
+	width: 100%;
 }
 .enemyname {
 	color:#BA2500;
@@ -99,6 +103,13 @@ function getRandomFloat(min, max) {
     return (Math.random() * (max - min + 1)) + min;
 }
 
+Storage.prototype.setObj = function(key, obj) {
+    return this.setItem(key, JSON.stringify(obj))
+}
+Storage.prototype.getObj = function(key) {
+    return JSON.parse(this.getItem(key))
+}
+
 var deploy = {
 	mobs : [
 		{ name : "Эфирная мышь", type : 'mob', reward : { exp: 5, gold: 15 }, attrs : { agi : 2, str : 1.2, vit : 1.5, lak : 3 }, chance: 40},
@@ -108,28 +119,32 @@ var deploy = {
 }
 
 var World = klass(function(data) {
-	this.player = null;
-	this.enemys = {};
-	this.dead = {};
-	this.logsize = 1000;
-	this.mobcnt = 0;
-	this.level = 1;
-
-	// loop
-	this.fps = 20;
-	this.startTime = $.now(); // время сздания игры
-	this.utime = this.startTime; // время последнего тика
-	this.time = 0; // внутренне время мира
-	this.ptime = 0; // предыдущий тик
-
-	// сохранения мира
-	this.savePeriod = 60*1000; // milisec
-	this.saveTime = this.savePeriod
+	this.reset();
 	$.extend(this, data)
 })
 .statics({
 })
 .methods({
+	reset : function() {
+		this.player = null;
+		this.enemys = {};
+		this.dead = {};
+		this.logsize = 1000;
+		this.mobcnt = 0;
+		this.level = 1;
+
+		// loop
+		this.fps = 20;
+		this.startTime = $.now(); // время сздания игры
+		this.utime = this.startTime; // время последнего тика
+		this.time = 0; // внутренне время мира
+		this.ptime = 0; // предыдущий тик
+
+		// сохранения мира
+		this.savePeriod = 60*1000; // milisec
+		this.saveTime = this.savePeriod
+	},
+
 	loop : function() {
 		this.onStart();
 		if (this.loopId) {
@@ -185,6 +200,7 @@ var World = klass(function(data) {
 		}
 
 		this.trySave();
+		this.save();
 	},
 
 	log : function(message) {
@@ -212,23 +228,67 @@ var World = klass(function(data) {
 		this.save();
 	},
 
-	save : function() {
-		var data = {};
-		// 1) параметры мира, кроме таймеров
-		// 2) сохранить самого игрока
-		// 3) сохрнать мобов
-		// 4) сохранить последние 100 записей из лога
+	wipe : function() {
+		localStorage.setObj('save', false);
+		this.load();
+	},
+
+	newgame : function() {
+		$.extend(this, new World({}));
+		$('#enemylist > tbody').remove();
+		$('#loglist > tbody').remove();
+		this.spawnPlayer();
 	},
 
 	load : function() {
-		// тут развернуть
+		var record = localStorage.getObj("save");
+		if (!record) {
+			return this.newgame();
+		}
+
+		var data = record.world;
+		var playerdata = data.player;
+		var enemydata = data.enemys;
+		delete data.player;
+		delete data.enemys;
+		delete data.dead;
+		data.utime = $.now();
+
+		$('#enemylist > tbody').remove();
+		$('#loglist > tbody').remove();
+
+		$.extend(this, data);
+		$.world.log('Игра обнулена');
+
+		var player = new Player({});
+		player.load(playerdata);
+		player.spawn();
+
+		this.enemys = {};
+		for (key in enemydata) {
+			var enemy = enemydata[key];
+			var mob = new Mob({});
+			mob.load(enemy);
+			mob.spawn();
+		}
+
+		return true;
+	},
+
+	save : function() {
+		localStorage.setObj("save", {
+			saveTime : $.now(),
+			world : this,
+		});
+
+		// 4) сохранить последние 100 записей из лога
 	},
 
 	bind : function() {
 		// контролы:
 		// кнопка спавна мобов
 		var self = this;
-		$('#addenemy').click(function(e) {
+		$('#addenemy').unbind("click").click(function(e) {
 			var chance = 0;
 			for (key in deploy.mobs) {
 				var mob = deploy.mobs[key];
@@ -254,7 +314,7 @@ var World = klass(function(data) {
 			self.spawnMob(found);
 		});
 
-		$('#addenemylvl').click(function(e) {
+		$('#addenemylvl').unbind("click").click(function(e) {
 			var val = 1;
 			if (e.shiftKey) {
 				val *= 10;
@@ -263,7 +323,7 @@ var World = klass(function(data) {
 			$('#worldlevel').text(self.level);
 		});
 
-		$('#remenemylvl').click(function(e) {
+		$('#remenemylvl').unbind("click").click(function(e) {
 			var val = -1;
 			if (e.shiftKey) {
 				val *= 10;
@@ -272,7 +332,16 @@ var World = klass(function(data) {
 			$('#worldlevel').text(self.level);
 		});
 
-		$(document).on('click', '.choisenemy', function(e) {
+		$('#saveworld').unbind("click").click(function(e) {
+			self.save();
+			$.world.log('Игра сохранена');
+		});
+
+		$('#wipeworld').unbind("click").click(function(e) {
+			self.wipe();
+		});
+
+		$(document).off('click', '.choisenemy').on('click', '.choisenemy', function(e) {
 			var $that = $(this);
 			var $enemyrow = $(this).closest('.enemyrow');
 			var id = parseInt($enemyrow.attr('enemyid'));
@@ -300,9 +369,7 @@ var World = klass(function(data) {
 
 	onStart : function() {
 		this.bind();
-
-		// игрок
-		this.spawnPlayer();
+		this.load();
 	},
 
 	spawnPlayer : function() {
@@ -353,6 +420,14 @@ var Mob = klass(function(data) {
 	$.extend(this, data)
 })
 .methods({
+
+	load : function(data) {
+		this.reset();
+		$.extend(this, data);
+		this.nodes = {};
+		this.recalc();
+	},
+
 	reset : function() {
 		this.id = 0;
 		this.tag = '#enemy0';
@@ -610,34 +685,44 @@ var Mob = klass(function(data) {
 });
 
 var Player = Mob.extend(function(data) {
-	var self = this;
-	$('.stat .add', self.tag).click(function(e) {
-		var val = 1;
-		var attr = $(this).closest('tr').attr('attr');
-		if (e.shiftKey) {
-			val *= 10;
-		}
-		self.setSkill(attr, val)
-		self.redraw();
-	});
-
-	$('.stat .rem', self.tag).click(function(e) {
-		var val = -1;
-		var attr = $(this).closest('tr').attr('attr');
-		if (e.shiftKey) {
-			val *= 10;
-		}
-		self.setSkill(attr, val)
-		self.redraw();
-	});
-
-	$('#resurect').click(function(e) {
-		$.world.player.resurect();
-	});
-
 	this.factor = 1;
+	$.extend(this, data);
 })
 .methods({
+
+	load : function(data) {
+		this.reset();
+		$.extend(this, data);
+		this.nodes = {};
+		this.recalc();
+	},
+
+	bind : function () {
+		var self = this;
+		$('.stat .add', self.tag).unbind("click").click(function(e) {
+			var val = 1;
+			var attr = $(this).closest('tr').attr('attr');
+			if (e.shiftKey) {
+				val *= 10;
+			}
+			self.setSkill(attr, val)
+			self.redraw();
+		});
+
+		$('.stat .rem', self.tag).unbind("click").click(function(e) {
+			var val = -1;
+			var attr = $(this).closest('tr').attr('attr');
+			if (e.shiftKey) {
+				val *= 10;
+			}
+			self.setSkill(attr, val)
+			self.redraw();
+		});
+
+		$('#resurect').unbind("click").click(function(e) {
+			$.world.player.resurect();
+		});
+	},
 
 	getName : function(gender, tens) {
 		return sprintf("<b class=playername>%s</b>", this.name);
@@ -645,6 +730,7 @@ var Player = Mob.extend(function(data) {
 
 	spawn : function() {
 		$.world.player = this;
+		this.bind();
 		this.redraw();
 		this.onSpawn();
 	},
@@ -732,6 +818,12 @@ var Player = Mob.extend(function(data) {
 		this.getNode('[attr=agi] > .val').text(this.agi);
 		this.getNode('[attr=lak] > .val').text(this.lak);
 		this.getNode('[attr=mst] > .val').text(this.mst);
+
+		if (this.hp < 1) {
+			$('#resurect').show();
+		} else {
+			$('#resurect').hide();
+		}
 	},
 
 	onUpdate : function() {
@@ -872,10 +964,18 @@ $(document).ready(function() {
 				<div class="death"> </div>
 			</li>
 			<hr />
-			<center><button id="resurect" class="btn btn-primary" style="display:none">Воскресить</button></center>
+			<li>
+				<button id="resurect" class="btn btn-xs btn-primary" style="display:none;">Воскресить</button>
+			</li>
+			<li>
+				<button id="saveworld" class="btn btn-xs btn-success">Сохранить</button>
+			</li>
+			<li>
+				<button id="wipeworld" class="btn btn-xs btn-danger">Обнулить</button>
+			</li>
 		</ul>
 
-		<center><h6> Blah v 0.011 </h6></center>
+		<center><h6> Blah v 0.012 </h6></center>
 	</div>
 	<div class="col-md-6 column ui-sortable">
 		<h4>События</h4>
