@@ -145,6 +145,10 @@ var World = klass(function(data) {
 		this.saveTime = this.savePeriod
 	},
 
+	redraw : function() {
+		$('#worldlevel').text(this.level);
+	},
+
 	loop : function() {
 		this.onStart();
 		if (this.loopId) {
@@ -200,7 +204,6 @@ var World = klass(function(data) {
 		}
 
 		this.trySave();
-		this.save();
 	},
 
 	log : function(message) {
@@ -225,6 +228,7 @@ var World = klass(function(data) {
 		if (this.time - this.saveTime < this.savePeriod) {
 			return;
 		}
+		this.saveTime = this.time;
 		this.save();
 	},
 
@@ -258,7 +262,11 @@ var World = klass(function(data) {
 		$('#loglist > tbody').remove();
 
 		$.extend(this, data);
-		$.world.log('Игра обнулена');
+		if ($.world.time == 0) {
+			$.world.log('Игра обнулена');
+		} else {
+			$.world.log('Игра загружена');
+		}
 
 		var player = new Player({});
 		player.load(playerdata);
@@ -280,6 +288,8 @@ var World = klass(function(data) {
 			saveTime : $.now(),
 			world : this,
 		});
+
+		$.world.log('Игра сохранена');
 
 		// 4) сохранить последние 100 записей из лога
 	},
@@ -320,7 +330,7 @@ var World = klass(function(data) {
 				val *= 10;
 			}
 			self.level = Math.max(1, self.level+val);
-			$('#worldlevel').text(self.level);
+			self.redraw();
 		});
 
 		$('#remenemylvl').unbind("click").click(function(e) {
@@ -329,16 +339,17 @@ var World = klass(function(data) {
 				val *= 10;
 			}
 			self.level = Math.max(1, self.level+val);
-			$('#worldlevel').text(self.level);
+			self.redraw();
 		});
 
 		$('#saveworld').unbind("click").click(function(e) {
 			self.save();
-			$.world.log('Игра сохранена');
+			self.redraw();
 		});
 
 		$('#wipeworld').unbind("click").click(function(e) {
 			self.wipe();
+			self.redraw();
 		});
 
 		$(document).off('click', '.choisenemy').on('click', '.choisenemy', function(e) {
