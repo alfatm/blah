@@ -278,7 +278,7 @@ var World = klass(function(data) {
 		}
 
 		if (this.enemys) {
-			for (var key in this.enemys) { 
+			for (var key in this.enemys) {
 				var enemy = this.enemys[key];
 				enemy.onUpdate(this);
 				enemy.onLate(this);
@@ -286,7 +286,7 @@ var World = klass(function(data) {
 		}
 
 		if (this.dead) {
-			for (var key in this.dead) { 
+			for (var key in this.dead) {
 				var enemy = this.dead[key];
 				enemy.onUpdate(this);
 				enemy.onLate(this);
@@ -312,7 +312,7 @@ var World = klass(function(data) {
 	},
 
 	log : function(message) {
-		var arg = Array.splice(arguments, 0);
+		var arg = Array.prototype.splice(arguments, 0);
 		var msg = sprintf.apply(null, arg);
 
 		// текущее время
@@ -326,7 +326,7 @@ var World = klass(function(data) {
 	},
 
 	logtoken : function(token, message) {
-		var arg = Array.splice(arguments, 0);
+		var arg = Array.prototype.splice(arguments, 0);
 		arg.splice(0,1);
 		var msg = sprintf.apply(null, arg);
 
@@ -695,7 +695,7 @@ var Mob = klass(function(data) {
 	},
 
 	hit : function() {
-		var crit = this.crit >= getRandomFloat(0,100) ? 2 : 1; 
+		var crit = this.crit >= getRandomFloat(0,100) ? 2 : 1;
 		return {
 			damage: getRandomInt(this.dmgMin, this.dmgMax) * crit,
 			crit : crit,
@@ -936,7 +936,7 @@ var Player = Mob.extend(function(data) {
 				if (enemy.targeted) {
 					if (i == pos) {
 						return enemy;
-					} 
+					}
 					i++;
 				}
 			}
@@ -959,6 +959,7 @@ var Player = Mob.extend(function(data) {
 		this.getNode('.gold').text(this.gold);
 		this.getNode('.skillPoints').text(this.skillPoints);
 		this.getNode('.hp').text(sprintf("%d/%d", this.hp, this.hpMax));
+		this.getNode('.hpregen').text(sprintf("%.2f в сек", this.hpRegen*2));
 		this.getNode('.name').val(this.name);
 		this.getNode('.atmin').text(sprintf("%.2f", this.dmgMin));
 		this.getNode('.atmax').text(sprintf("%.2f", this.dmgMax));
@@ -1076,6 +1077,12 @@ $(document).ready(function() {
 			<li>
 				<cap>Жизни: </cap>
 				<div class="hp"> </div>
+			</li>
+			<li>
+				<cap>Регенерация: </cap>
+				<div class="hpregen"> </div>
+			</li>
+			<li>
 				<div id="resurectTime" style="display:none;"> </div>
 			</li>
 			<hr />
