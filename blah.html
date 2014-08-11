@@ -312,7 +312,7 @@ var World = klass(function(data) {
 	},
 
 	log : function(message) {
-		var arg = Array.prototype.splice(arguments, 0);
+		var arg = Array.prototype.splice.call(arguments, 0);
 		var msg = sprintf.apply(null, arg);
 
 		// текущее время
@@ -326,7 +326,7 @@ var World = klass(function(data) {
 	},
 
 	logtoken : function(token, message) {
-		var arg = Array.prototype.splice(arguments, 0);
+		var arg = Array.prototype.splice.call(arguments, 0);
 		arg.splice(0,1);
 		var msg = sprintf.apply(null, arg);
 
@@ -504,7 +504,7 @@ var World = klass(function(data) {
 		if (this.player.dead) {
 			return;
 		}
-		this.spawnTime = 0;
+		this.spawnTime = this.getSpawnTime();
 		this.checkSpawner();
 	},
 
