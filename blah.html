@@ -2,16 +2,17 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>blah 0.012</title>
-<script src="http://code.jquery.com/jquery-2.1.1.min.js"></script>
-<script src="http://code.jquery.com/ui/1.11.0/jquery-ui.min.js"></script>
+<title>blah 0.014</title>
+<link href="favicon.ico" rel="shortcut icon">
+<script src="ext/jquery-2.1.1.min.js"></script>
+<script src="ext/jquery-ui.min.js"></script>
 
-<script src="http://cdnjs.cloudflare.com/ajax/libs/sprintf/0.0.7/sprintf.min.js"></script>
+<script src="ext/sprintf.min.js"></script>
 
-<script src="http://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/js/bootstrap.min.js"></script>
-<link href="http://maxcdn.bootstrapcdn.com/bootstrap/3.2.0/css/bootstrap.min.css" rel="stylesheet" />
+<script src="ext/bootstrap.min.js"></script>
+<link href="ext/bootstrap.min.css" rel="stylesheet" />
 
-<script src="http://cdnjs.cloudflare.com/ajax/libs/klass/1.4.0/klass.min.js"></script>
+<script src="ext/klass.min.js"></script>
 
 <style>
 *, body, html {
@@ -114,6 +115,7 @@ var deploy = {
 	mobs : [
 		{ name : "Эфирная мышь", type : 'mob', reward : { exp: 5, gold: 15 }, attrs : { agi : 2, str : 1.2, vit : 1.5, lak : 3 }, chance: 40},
 		{ name : "Боевой таракан", type : 'mob', reward : { exp: 7, gold: 20 }, attrs : { agi : 1.4, str : 3, vit : 2 }, chance: 40 },
+		{ name : "Жадная крыса", type : 'elite', reward : { exp: 55, gold: 40 }, attrs : { agi : 4, str : 1.1, vit : 8 }, chance: 10 },
 		{ name : "Пукано-рватель", type : 'boss', reward : { exp: 15, gold: 50 }, attrs : { agi : 5, str : 6, vit : 6 }, chance: 5 },
 	],
 }
@@ -140,188 +142,48 @@ var World = klass(function(data) {
 		this.time = 0; // внутренне время мира
 		this.ptime = 0; // предыдущий тик
 
+		this.spawnCnt = 1;
+		this.spawnTime = 0;
+
 		// сохранения мира
-		this.savePeriod = 60*1000; // milisec
+		this.savePeriod = 120*1000; // milisec
 		this.saveTime = this.savePeriod
 	},
 
 	redraw : function() {
 		$('#worldlevel').text(this.level);
+		var dt = Math.max(0, -this.getSpawnTime()/1000)
+		var ct = this.getSpawnMonsterCnt();
+		$('#spawnrate').text(sprintf("Спавнеров %d, %d монстров появится через %d секунд", this.spawnCnt, ct, dt));
 	},
 
-	loop : function() {
-		this.onStart();
-		if (this.loopId) {
-			clearInterval(this.loopId);
-		}
-		var self = this;
-		this.loopId = window.setInterval(function() {
-			self.update();
-		}, 1000/this.fps);
-		return this;
-	},
-
-	update : function() {
-		var time = $.now();
-		if (time < this.utime) {
-			// нельзя тикать назад
-			return;
-		}
-
-		var dt = time - this.utime;
-		var fp = Math.floor(dt/this.fps);
-
-		// для очень лагучих миров
-		if (dt > 2000) {
-			dt = 2000;
-			// console.log('время, не беги так быстро', this);
-		}
-
-		this.dt = dt;
-		this.utime = time;
-		this.ptime = this.time
-		this.time += dt;
-
-		if (this.player) {
-			this.player.onUpdate(this);
-			this.player.onLate(this);
-		}
-
-		if (this.enemys) {
-			for (var key in this.enemys) { 
-				var enemy = this.enemys[key];
-				enemy.onUpdate(this);
-				enemy.onLate(this);
-			}
-		}
-
-		if (this.dead) {
-			for (var key in this.dead) { 
-				var enemy = this.dead[key];
-				enemy.onUpdate(this);
-				enemy.onLate(this);
-			}
-		}
-
-		this.trySave();
-	},
-
-	log : function(message) {
-		var arg = Array.splice(arguments, 0);
-		var msg = sprintf.apply(null, arg);
-
-		// текущее время
-		var date = new Date($.world.utime);
-		var datestr = sprintf("%s.%03d", date.toLocaleTimeString(), date.getMilliseconds()); 
-
-		var $loglist = $('#loglist');
-		$loglist.prepend("<tr><td>"+datestr+"</td><td>"+msg+"</td></tr>");
-
-		// удалять старые логи
-		var len = $('tr', $loglist).length;
-		for (var i = 0; i < len - this.logsize; i++) {
-			$('tr', $loglist).last().remove();
-		}
-	},
-
-	trySave : function() {
-		if (this.time - this.saveTime < this.savePeriod) {
-			return;
-		}
-		this.saveTime = this.time;
-		this.save();
-	},
-
-	wipe : function() {
-		localStorage.setObj('save', false);
-		this.load();
-	},
-
-	newgame : function() {
-		$.extend(this, new World({}));
-		$('#enemylist > tbody').remove();
-		$('#loglist > tbody').remove();
-		this.spawnPlayer();
-	},
-
-	load : function() {
-		var record = localStorage.getObj("save");
-		if (!record) {
-			return this.newgame();
-		}
-
-		var data = record.world;
-		var playerdata = data.player;
-		var enemydata = data.enemys;
-		delete data.player;
-		delete data.enemys;
-		delete data.dead;
-		data.utime = $.now();
-
-		$('#enemylist > tbody').remove();
-		$('#loglist > tbody').remove();
-
-		$.extend(this, data);
-		if ($.world.time == 0) {
-			$.world.log('Игра обнулена');
-		} else {
-			$.world.log('Игра загружена');
-		}
-
-		var player = new Player({});
-		player.load(playerdata);
-		player.spawn();
-
-		this.enemys = {};
-		for (key in enemydata) {
-			var enemy = enemydata[key];
-			var mob = new Mob({});
-			mob.load(enemy);
-			mob.spawn();
-		}
-
-		return true;
-	},
-
-	save : function() {
-		localStorage.setObj("save", {
-			saveTime : $.now(),
-			world : this,
-		});
-
-		$.world.log('Игра сохранена');
-
-		// 4) сохранить последние 100 записей из лога
-	},
 
 	bind : function() {
 		// контролы:
 		// кнопка спавна мобов
 		var self = this;
-		$('#addenemy').unbind("click").click(function(e) {
-			var chance = 0;
-			for (key in deploy.mobs) {
-				var mob = deploy.mobs[key];
-				chance += mob.chance;
+		$('#addspawner').unbind("click").click(function(e) {
+			var val = 1;
+			if (e.shiftKey) {
+				val *= 10;
 			}
+			self.addSpawner(val);
+		});
 
-			var roll = getRandomFloat(0, chance);
-			var r = 0;
-			var found = null;
-			for (key in deploy.mobs) {
-				var mob = deploy.mobs[key];
-				r = r + mob.chance;
-				if (r >= roll) {
-					found = key;
-					break;
-				}
+		$('#remspawner').unbind("click").click(function(e) {
+			var val = 1;
+			if (e.shiftKey) {
+				val *= 10;
 			}
+			self.remSpawner(val);
+		});
 
-			if (!found) {
-				return;
-			}
+		$('#forcespawner').unbind("click").click(function(e) {
+			self.forceSpawner();
+		});
 
-			self.spawnMob(found);
+		$('#remcorpses').unbind("click").click(function(e) {
+			self.remCorpses();
 		});
 
 		$('#addenemylvl').unbind("click").click(function(e) {
@@ -373,9 +235,185 @@ var World = klass(function(data) {
 				$that.removeClass('btn-success');
 			}
 		});
+	},
 
-		// кнопка резета
-		// кнопка сохранения ручного
+	loop : function() {
+		this.onStart();
+		if (this.loopId) {
+			clearInterval(this.loopId);
+		}
+		var self = this;
+		this.loopId = window.setInterval(function() {
+			self.update();
+		}, 1000/this.fps);
+		return this;
+	},
+
+	update : function() {
+		var time = $.now();
+		if (time < this.utime) {
+			// нельзя тикать назад
+			return;
+		}
+
+		var dt = time - this.utime;
+		var fp = Math.floor(dt/this.fps);
+
+		// для очень лагучих миров
+		if (dt > 2000) {
+			dt = 2000;
+			// console.log('время, не беги так быстро', this);
+		}
+
+		this.dt = dt;
+		this.utime = time;
+		this.ptime = this.time
+		this.time += dt;
+
+		this.onUpdate();
+
+		if (this.player) {
+			this.player.onUpdate(this);
+			this.player.onLate(this);
+		}
+
+		if (this.enemys) {
+			for (var key in this.enemys) { 
+				var enemy = this.enemys[key];
+				enemy.onUpdate(this);
+				enemy.onLate(this);
+			}
+		}
+
+		if (this.dead) {
+			for (var key in this.dead) { 
+				var enemy = this.dead[key];
+				enemy.onUpdate(this);
+				enemy.onLate(this);
+			}
+		}
+
+		this.trySave();
+		this.onLate();
+	},
+
+	logdate: function() {
+		var date = new Date($.world.utime);
+		var datestr = sprintf("%s.%03d", date.toLocaleTimeString(), date.getMilliseconds());
+		return datestr;
+	},
+
+	logclean: function(logsize) {
+		var $loglist = $('#loglist');
+		var len = $('tr', $loglist).length;
+		for (var i = 0; i < len - logsize; i++) {
+			$('tr', $loglist).last().remove();
+		}
+	},
+
+	log : function(message) {
+		var arg = Array.splice(arguments, 0);
+		var msg = sprintf.apply(null, arg);
+
+		// текущее время
+		var datestr = this.logdate();
+
+		var $loglist = $('#loglist');
+		$loglist.prepend('<tr><td>'+datestr+'</td><td>'+msg+'</td></tr>');
+
+		// удалять старые логи
+		this.logclean(this.logsize);
+	},
+
+	logtoken : function(token, message) {
+		var arg = Array.splice(arguments, 0);
+		arg.splice(0,1);
+		var msg = sprintf.apply(null, arg);
+
+		var datestr = this.logdate();
+
+		var $loglist = $('#loglist');
+
+		// удалить лог с токеном
+		$loglist.find('[token='+token+']').first().remove();
+
+		// добавить свежилог
+		$loglist.prepend('<tr token="'+token+'"><td>'+datestr+'</td><td>'+msg+'</td></tr>');
+
+		// удалять старые логи
+		this.logclean(this.logsize);
+	},
+
+	trySave : function() {
+		if (this.time - this.saveTime < this.savePeriod) {
+			return;
+		}
+		this.saveTime = this.time;
+		this.save();
+	},
+
+	wipe : function() {
+		localStorage.setObj('save', false);
+		this.load();
+	},
+
+	newgame : function() {
+		$.extend(this, new World({}));
+		$('#enemylist > tbody').remove();
+		$('#loglist > tbody').remove();
+		this.spawnPlayer();
+		this.redraw();
+	},
+
+	load : function() {
+		var record = localStorage.getObj("save");
+		if (!record) {
+			return this.newgame();
+		}
+
+		var data = record.world;
+		var playerdata = data.player;
+		var enemydata = data.enemys;
+		delete data.player;
+		delete data.enemys;
+		delete data.dead;
+		data.utime = $.now();
+
+		$('#enemylist > tbody').remove();
+		$('#loglist > tbody').remove();
+
+		$.extend(this, data);
+		if ($.world.time == 0) {
+			$.world.log('Игра обнулена');
+		} else {
+			$.world.log('Игра загружена');
+		}
+
+		var player = new Player({});
+		player.load(playerdata);
+		player.spawn();
+
+		this.enemys = {};
+		for (key in enemydata) {
+			var enemy = enemydata[key];
+			var mob = new Mob({});
+			mob.load(enemy);
+			mob.spawn();
+		}
+
+		this.redraw();
+		return true;
+	},
+
+	save : function() {
+		localStorage.setObj("save", {
+			saveTime : $.now(),
+			world : this,
+		});
+
+		$.world.logtoken('savegame', 'Игра сохранена');
+
+		// 4) сохранить последние 100 записей из лога
 	},
 
 	onStart : function() {
@@ -400,8 +438,88 @@ var World = klass(function(data) {
 		player.spawn();
 	},
 
-	spawnMob : function(mobId) {
-		var tpl = deploy.mobs[mobId];
+	addSpawner : function(val) {
+		this.spawnCnt += val;
+		this.redraw();
+	},
+
+	remSpawner : function(val) {
+		this.spawnCnt = Math.max(1, this.spawnCnt - val);
+		this.redraw();
+	},
+
+	getSpawnRate : function() {
+		// кол-во секунд до следующего моба
+		var rate = 60 / (this.spawnCnt / this.level);
+		return rate;
+	},
+
+	getSpawnTime : function() {
+		var rate = this.getSpawnRate()*1000;
+		var left = this.time - this.spawnTime - rate
+		return left;
+	},
+
+	getSpawnMonsterCnt : function() {
+		return Math.floor(Math.max(1, this.spawnCnt/this.level));
+	},
+
+	rollMob : function() {
+		var chance = 0;
+		for (key in deploy.mobs) {
+			var mob = deploy.mobs[key];
+			chance += mob.chance;
+		}
+
+		var roll = getRandomFloat(0, chance);
+		var r = 0;
+		for (key in deploy.mobs) {
+			var mob = deploy.mobs[key];
+			r = r + mob.chance;
+			if (r >= roll) {
+				return mob;
+			}
+		}
+	},
+
+	checkSpawner : function() {
+		if (this.player.dead) {
+			this.spawnTime = this.time;
+		}
+
+		var timeout = this.getSpawnTime();
+		if (timeout<=0) {
+			return;
+		}
+
+		this.spawnTime = this.time;
+		var ct = this.getSpawnMonsterCnt();
+		for (var i = 0; i < ct; ++i) {
+			var found = this.rollMob();
+			this.spawnMob(found);
+		};
+	},
+
+	forceSpawner : function() {
+		if (this.player.dead) {
+			return;
+		}
+		this.spawnTime = 0;
+		this.checkSpawner();
+	},
+
+	spawnMob : function(mob) {
+		if (!mob) {
+			return;
+		}
+
+		var tpl = null;
+		if( typeof mob === 'object' ) {
+			tpl = mob;
+		} else {
+			tpl = deploy.mobs[mob];
+		}
+
 		var index = ++$.world.mobcnt;
 		var mob = new Mob({
 			id : index,
@@ -424,6 +542,21 @@ var World = klass(function(data) {
 		mob.preper();
 		mob.spawn();
 	},
+
+	remCorpses : function() {
+		for (key in $.world.dead) {
+			$.world.dead[key].wipe();
+		}
+	},
+
+	onUpdate : function() {
+		this.checkSpawner();
+	},
+
+	onLate : function() {
+		this.redraw();
+	},
+
 });
 
 var Mob = klass(function(data) {
@@ -456,7 +589,6 @@ var Mob = klass(function(data) {
 		this.gold = 0;
 		this.lastAttack = $.world.time;
 		this.lastRegen = 0;
-		this.attackMaxCnt = 10;//hits
 		this.corpsRemoveTime = 100;//sec
 		this.kills = 0;
 		this.death = 0;
@@ -585,7 +717,7 @@ var Mob = klass(function(data) {
 		this.hpRegenTick = 500;
 		this.dmgMin = 0.1 * this.str;
 		this.dmgMax = 0.25 * this.str;
-		this.aspd = Math.min(10, this.agi*0.1);
+		this.aspd = Math.min(40, this.agi*0.1);
 		this.crit = 0.5 * this.lak;
 		this.def = 0;
 		var skillcnt = this.getAttr('str')
@@ -610,8 +742,8 @@ var Mob = klass(function(data) {
 			return false;
 		}
 
+		var at = Math.min(this.aspd, dt)/ac;
 		this.lastAttack = $.world.time;
-		var at = Math.min(this.attackMaxCnt, Math.floor(dt/ac)); 
 		for (var i = 0; i < at; i++) {
 			var enemy = this.rollEnemy();
 			if (enemy && !enemy.dead) {
@@ -635,17 +767,10 @@ var Mob = klass(function(data) {
 		this.getNode('.name').text(this.name);
 	},
 
-	resurect: function() {
-		this.hp = this.hpMax;
-		this.dead = false;
-		$('#resurect').hide();
-		this.redraw();
-	},
-
 	onUpdate : function() {
 		if (this.dead) {
 			if ($.world.time - this.deadTime > this.corpsRemoveTime*1000) {
-				$(this.tag).remove();
+				this.wipe();
 			}
 			return;
 		}
@@ -678,6 +803,16 @@ var Mob = klass(function(data) {
 		// моб мог бы левелапаться если побеждает игрока, или наоборот слабеть что б игрок мог его всётаки победить
 	},
 
+	wipe : function() {
+		if ($.world.dead[this.id]) {
+			delete $.world.dead[this.id];
+		}
+		if ($.world.enemys[this.id]) {
+			delete $.world.enemys[this.id];
+		}
+		$(this.tag).remove();
+	},
+
 	onDead : function() {
 		$.world.log('Побеждён %s %d уровня, награда %d опыта и %d золота', this.getName(), this.level, this.reward.exp, this.reward.gold);
 		this.getNode().addClass('deadenemy');
@@ -697,6 +832,7 @@ var Mob = klass(function(data) {
 
 var Player = Mob.extend(function(data) {
 	this.factor = 1;
+	this.resurectTimeout = 15*1000;// 15 sec
 	$.extend(this, data);
 })
 .methods({
@@ -731,7 +867,7 @@ var Player = Mob.extend(function(data) {
 		});
 
 		$('#resurect').unbind("click").click(function(e) {
-			$.world.player.resurect();
+			self.resurect();
 		});
 	},
 
@@ -744,6 +880,14 @@ var Player = Mob.extend(function(data) {
 		this.bind();
 		this.redraw();
 		this.onSpawn();
+	},
+
+	resurect: function() {
+		this.hp = this.hpMax;
+		this.dead = false;
+		$('#resurect').hide();
+		$('#resurectTime').hide();
+		this.redraw();
 	},
 
 	addExp : function(level, val) {
@@ -831,13 +975,30 @@ var Player = Mob.extend(function(data) {
 		this.getNode('[attr=mst] > .val').text(this.mst);
 
 		if (this.hp < 1) {
-			$('#resurect').show();
+			$('#resurect').css('display', 'block');
+			$('#resurectTime').css('display', 'block');
 		} else {
-			$('#resurect').hide();
+			$('#resurect').css('display', 'none');
+			$('#resurectTime').css('display', 'none');
 		}
 	},
 
+	tryResurect : function() {
+		if (!this.dead) {
+			return;
+		}
+
+		if ($.world.time - this.deadTime < this.resurectTimeout) {
+			var dt = (this.resurectTimeout + this.deadTime - $.world.time)/1000;
+			$('#resurectTime').text(sprintf("До воскрешения %d секунд", dt));
+			return;
+		}
+
+		this.resurect();
+	},
+
 	onUpdate : function() {
+		this.tryResurect();
 		this.regen();
 		this.attack();
 	},
@@ -861,12 +1022,24 @@ var Player = Mob.extend(function(data) {
 	},
 
 	onDead : function() {
-		$.world.log('Побеждён %s, %d уровня', this.name, this.level);
+		var penalty = Math.floor(this.gold/100)*10;
+		$.world.log('Побеждён %s, %d уровня, смерть забрала %d золота', this.getName(), this.level, penalty);
+		this.gold -= penalty;
 		this.dead = true;
 		this.deadTime = $.world.time;
 		this.death += 1;
 		$('#resurect').show();
+		$('#resurectTime').show();
 		this.redraw();
+
+		// убрать всех врагов, иначе почему ты сдох хм?
+		for (key in $.world.enemys) {
+			$.world.enemys[key].wipe();
+		}
+		for (key in $.world.dead) {
+			$.world.dead[key].wipe();
+		}
+		$.world.save();
 	},
 });
 
@@ -903,6 +1076,7 @@ $(document).ready(function() {
 			<li>
 				<cap>Жизни: </cap>
 				<div class="hp"> </div>
+				<div id="resurectTime" style="display:none;"> </div>
 			</li>
 			<hr />
 			<li>
@@ -986,7 +1160,7 @@ $(document).ready(function() {
 			</li>
 		</ul>
 
-		<center><h6> Blah v 0.012 </h6></center>
+		<center><h6>Blah v 0.014</h6></center>
 	</div>
 	<div class="col-md-6 column ui-sortable">
 		<h4>События</h4>
@@ -994,10 +1168,15 @@ $(document).ready(function() {
 		</table>
 	</div>
 	<div class="col-md-4 column ui-sortable">
-		<h4>Уровень подземелья (LVL: <span id="worldlevel">1</span>)</h4>
-		<button class="btn btn-primary btn-xs" id=addenemy>Добавить врага</button>
-		<button class="btn btn-primary btn-xs" id=addenemylvl>+</button>
-		<button class="btn btn-warning btn-xs" id=remenemylvl>-</button>
+		<h4>Уровень подземелья (LVL: <span id="worldlevel">1</span>)
+			<button class="btn btn-primary btn-xs" id=addenemylvl>+</button>
+			<button class="btn btn-warning btn-xs" id=remenemylvl>-</button>
+		</h4>
+		<button class="btn btn-primary btn-xs" id=addspawner>Добавить спавнер</button>
+		<button class="btn btn-danger btn-xs" id=remspawner>Убрать спавнер</button>
+		<button class="btn btn-success btn-xs" id=forcespawner>Ускорить</button>
+		<button class="btn btn-default btn-xs" id=remcorpses>Сжечь трупы</button>
+		<p id="spawnrate"></p>
 		<table id=enemylist class="table table-striped">
 			<thead>
 			<tr id='dummy' class="enemyrow">
