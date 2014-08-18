@@ -1095,13 +1095,14 @@ var Item = klass(function(data) {
 	hoverShow : function(e) {
 		var player = $.world.player;
 		var $hover = this.getItemHover();
+		var stats = this.stats || {};
 		$('.name', $hover).text(this.name)
-		$('.dmg', $hover).text(this.stats.damage)
-		$('.str', $hover).text(this.stats.str);
-		$('.vit', $hover).text(this.stats.vit);
-		$('.agi', $hover).text(this.stats.agi);
-		$('.lak', $hover).text(this.stats.lak);
-		$('.mst', $hover).text(this.stats.mst);
+		$('.dmg', $hover).text(this.stats.damage || 0)
+		$('.str', $hover).text(this.stats.str || 0);
+		$('.vit', $hover).text(this.stats.vit || 0);
+		$('.agi', $hover).text(this.stats.agi || 0);
+		$('.lak', $hover).text(this.stats.lak || 0);
+		$('.mst', $hover).text(this.stats.mst || 0);
 
 		$hover.show().css({'left' : e.pageX, 'top' : e.pageY});
 	},
