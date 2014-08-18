@@ -839,11 +839,11 @@ var Mob = klass(function(data) {
 		$.world.log("<b>%s</b> атаковал <b>%s</b> на %.2f урона %s", enemy.getName(), this.getName(), hit.damage, critText);
 		this.redraw();
 
-		if (hit.crit && hit.crit>1) {
+		if (hit.crit==2) {
 			// для критов помедленнее и пожирнее
-			DamagePop.show(hpNode.offset(), sprintf("-%.2f", hit.damage), { color: "red", 'font-weight': 'bold' }, 0.5);
+			$.damagepop.show(hpNode.offset(), sprintf("-%.2f", hit.damage), { color: "red", 'font-weight': 'bold', 'font-size': "120%" }, 0.5);
 		} else {
-			DamagePop.show(hpNode.offset(), sprintf("-%.2f", hit.damage), { color: "red" }, 1.0);
+			$.damagepop.show(hpNode.offset(), sprintf("-%.2f", hit.damage), { color: "red" }, 1.0);
 		}
 
 		if (this.hp < 1) {
@@ -965,18 +965,19 @@ var DamagePop = klass(function() {
 })
 .statics({
 	enable : 1,
-	poolSize : 10,
-	pool : [],
-
+	poolSize: 100,
+	pool: [],
+})
+.methods({
 	pushCell : function() {
 		var $cell = $('<div class=dmgpop done=1></div>')
-		Array.push(DamagePop.pool, $cell);
+		Array.prototype.push.call(DamagePop.pool, $cell);
 		return $cell;
 	},
 
 	getCell : function() {
 		for (var i = 0; i < DamagePop.poolSize - DamagePop.pool.length; ++i) {
-			DamagePop.pushCell();
+			this.pushCell();
 		}
 
 		for (var key in DamagePop.pool) {
@@ -988,7 +989,7 @@ var DamagePop = klass(function() {
 	},
 
 	show : function(at, text, css, speed) {
-		var $cell = DamagePop.getCell();
+		var $cell = this.getCell();
 		if (!$cell || !DamagePop.enable) {
 			return;
 		}
@@ -1489,6 +1490,7 @@ var Player = Mob.extend(function(data) {
 
 $(document).ready(function() {
 	$('#tabs').tab();
+	$.damagepop = new DamagePop({});
 	$.world = new World({});
 	$.world.start();
 	$.world.loop();
