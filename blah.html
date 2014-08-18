@@ -2,25 +2,46 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>blah 0.014</title>
+<title>blah 0.015</title>
 <link href="favicon.ico" rel="shortcut icon">
 <script src="ext/jquery-2.1.1.min.js"></script>
 <script src="ext/jquery-ui.min.js"></script>
 
-<script src="ext/sprintf.min.js"></script>
+<script src="ext/sprintf.js"></script>
 
 <script src="ext/bootstrap.min.js"></script>
 <link href="ext/bootstrap.min.css" rel="stylesheet" />
 
 <script src="ext/klass.min.js"></script>
+<script src="ext/tool.js"></script>
 
 <style>
 *, body, html {
 	font-family: Verdana,"Helvetica Neue",Helvetica,Arial,sans-serif;
 }
+body {
+	overflow-y: scroll;
+}
 td, th {
     padding: 0;
     vertical-align: top;
+}
+.item, .item td, .item span {
+	cursor: pointer;
+}
+#footer {
+	height: 300px;
+}
+#itemHover {
+	background: #FAFAFA;
+	position: absolute;
+	border: 1px solid #EEE;
+	pointer-events: none;
+	padding: 20px;
+	margin-top: 25px;
+}
+#itemHover div, #itemHover p {
+	white-space: nowrap;
 }
 #player {
 	margin: 0;
@@ -37,12 +58,15 @@ td, th {
 	width: 55%;
 	min-width: 300px;
 }
+.enemyrow, .enemyrow div {
+	white-space: nowrap;
+}
 #enemytd {
 	padding-left: 10px;
 	width: 25%;
 	min-width: 250px;
 }
-#resurect, #saveworld, #wipeworld {
+#resurect, #saveworld, #wipeworld, #pause {
 	margin:  5px;
 	width: 100%;
 }
@@ -51,6 +75,9 @@ td, th {
 }
 .playername {
 	color:#006282;
+}
+.row {
+	margin-right: 0;
 }
 cap {
 	font-weight: bold;
@@ -91,40 +118,19 @@ td.val {
 	width:  auto;;
 }
 </style>
+
+<script src="deploy/mobs.js"></script>
+<script src="deploy/quality.js"></script>
+<script src="deploy/items.js"></script>
 <script>
-function getRandomArbitrary(min, max) {
-    return Math.random() * (max - min) + min;
-}
-
-function getRandomInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-function getRandomFloat(min, max) {
-    return (Math.random() * (max - min + 1)) + min;
-}
-
-Storage.prototype.setObj = function(key, obj) {
-    return this.setItem(key, JSON.stringify(obj))
-}
-Storage.prototype.getObj = function(key) {
-    return JSON.parse(this.getItem(key))
-}
-
-var deploy = {
-	mobs : [
-		{ name : "Эфирная мышь", type : 'mob', reward : { exp: 5, gold: 15 }, attrs : { agi : 2, str : 1.2, vit : 1.5, lak : 3 }, chance: 40},
-		{ name : "Боевой таракан", type : 'mob', reward : { exp: 7, gold: 20 }, attrs : { agi : 1.4, str : 3, vit : 2 }, chance: 40 },
-		{ name : "Жадная крыса", type : 'elite', reward : { exp: 55, gold: 40 }, attrs : { agi : 4, str : 1.1, vit : 8 }, chance: 10 },
-		{ name : "Пукано-рватель", type : 'boss', reward : { exp: 15, gold: 50 }, attrs : { agi : 5, str : 6, vit : 6 }, chance: 5 },
-	],
-}
+"use strict";
 
 var World = klass(function(data) {
 	this.reset();
 	$.extend(this, data)
 })
 .statics({
+	version : 1
 })
 .methods({
 	reset : function() {
@@ -155,8 +161,8 @@ var World = klass(function(data) {
 		var dt = Math.max(0, -this.getSpawnTime()/1000)
 		var ct = this.getSpawnMonsterCnt();
 		$('#spawnrate').text(sprintf("Спавнеров %d, %d монстров появится через %d секунд", this.spawnCnt, ct, dt));
+		this.redrawPause();
 	},
-
 
 	bind : function() {
 		// контролы:
@@ -214,6 +220,10 @@ var World = klass(function(data) {
 			self.redraw();
 		});
 
+		$('#pause').unbind("click").click(function(e) {
+			self.togglePause();
+		});
+
 		$(document).off('click', '.choisenemy').on('click', '.choisenemy', function(e) {
 			var $that = $(this);
 			var $enemyrow = $(this).closest('.enemyrow');
@@ -237,20 +247,53 @@ var World = klass(function(data) {
 		});
 	},
 
+	redrawPause : function() {
+		var $pause = $('#pause');
+		if (this.isPaused()) {
+			$pause.removeClass('btn-info');
+			$pause.addClass('btn-warning');
+			$pause.text('Запустить');
+		} else {
+			$pause.removeClass('btn-warning');
+			$pause.removeClass('active');
+			$pause.addClass('btn-info');
+			$pause.text('Пауза');
+		}
+	},
+
+	togglePause : function() {
+		this.paused = !this.isPaused();
+		this.redrawPause();
+	},
+
+	isPaused : function() {
+		return !!this.paused || !this.loopId;
+	},
+
 	loop : function() {
-		this.onStart();
 		if (this.loopId) {
 			clearInterval(this.loopId);
 		}
-		var self = this;
-		this.loopId = window.setInterval(function() {
-			self.update();
-		}, 1000/this.fps);
+		this.loopId = window.setInterval(this.update.bind(this), 1000/this.fps);
 		return this;
 	},
 
+	unloop : function() {
+		if (this.loopId) {
+			clearInterval(this.loopId);
+			this.loopId = null;
+		}
+	},
+
 	update : function() {
+		var self = this;
 		var time = $.now();
+
+		if (self.isPaused()) {
+			this.utime = time;
+			return;
+		}
+
 		if (time < this.utime) {
 			// нельзя тикать назад
 			return;
@@ -277,21 +320,15 @@ var World = klass(function(data) {
 			this.player.onLate(this);
 		}
 
-		if (this.enemys) {
-			for (var key in this.enemys) {
-				var enemy = this.enemys[key];
-				enemy.onUpdate(this);
-				enemy.onLate(this);
-			}
-		}
+		$.each(this.enemys, function(k,v) {
+			v.onUpdate(self);
+			v.onLate(self);
+		});
 
-		if (this.dead) {
-			for (var key in this.dead) {
-				var enemy = this.dead[key];
-				enemy.onUpdate(this);
-				enemy.onLate(this);
-			}
-		}
+		$.each(this.dead, function(k,v) {
+			v.onUpdate(self);
+			v.onLate(self);
+		});
 
 		this.trySave();
 		this.onLate();
@@ -305,7 +342,7 @@ var World = klass(function(data) {
 
 	logclean: function(logsize) {
 		var $loglist = $('#loglist');
-		var len = $('tr', $loglist).length;
+		var len = $('tr', $loglist).size();
 		for (var i = 0; i < len - logsize; i++) {
 			$('tr', $loglist).last().remove();
 		}
@@ -361,13 +398,14 @@ var World = klass(function(data) {
 		$.extend(this, new World({}));
 		$('#enemylist > tbody').remove();
 		$('#loglist > tbody').remove();
+		$('#inventory > tbody').remove();
 		this.spawnPlayer();
 		this.redraw();
 	},
 
 	load : function() {
 		var record = localStorage.getObj("save");
-		if (!record) {
+		if (!record || record.version !== World.version) {
 			return this.newgame();
 		}
 
@@ -381,6 +419,7 @@ var World = klass(function(data) {
 
 		$('#enemylist > tbody').remove();
 		$('#loglist > tbody').remove();
+		$('#inventory > tbody').remove();
 
 		$.extend(this, data);
 		if ($.world.time == 0) {
@@ -394,12 +433,11 @@ var World = klass(function(data) {
 		player.spawn();
 
 		this.enemys = {};
-		for (key in enemydata) {
-			var enemy = enemydata[key];
+		$.each(enemydata, function(k,v) {
 			var mob = new Mob({});
-			mob.load(enemy);
+			mob.load(v);
 			mob.spawn();
-		}
+		});
 
 		this.redraw();
 		return true;
@@ -409,6 +447,7 @@ var World = klass(function(data) {
 		localStorage.setObj("save", {
 			saveTime : $.now(),
 			world : this,
+			version : World.version,
 		});
 
 		$.world.logtoken('savegame', 'Игра сохранена');
@@ -416,7 +455,7 @@ var World = klass(function(data) {
 		// 4) сохранить последние 100 записей из лога
 	},
 
-	onStart : function() {
+	start: function() {
 		this.bind();
 		this.load();
 	},
@@ -466,15 +505,15 @@ var World = klass(function(data) {
 
 	rollMob : function() {
 		var chance = 0;
-		for (key in deploy.mobs) {
-			var mob = deploy.mobs[key];
+		for (var key in $.deploy.mobs) {
+			var mob = $.deploy.mobs[key];
 			chance += mob.chance;
 		}
 
 		var roll = getRandomFloat(0, chance);
 		var r = 0;
-		for (key in deploy.mobs) {
-			var mob = deploy.mobs[key];
+		for (var key in $.deploy.mobs) {
+			var mob = $.deploy.mobs[key];
 			r = r + mob.chance;
 			if (r >= roll) {
 				return mob;
@@ -508,6 +547,11 @@ var World = klass(function(data) {
 		this.checkSpawner();
 	},
 
+	spawnMobByTplId : function($tplId) {
+		var tpl = $.deploy.mobs[$tplId];
+		this.spawnMob(tpl);
+	},
+
 	spawnMob : function(mob) {
 		if (!mob) {
 			return;
@@ -517,14 +561,14 @@ var World = klass(function(data) {
 		if( typeof mob === 'object' ) {
 			tpl = mob;
 		} else {
-			tpl = deploy.mobs[mob];
+			tpl = $.deploy.mobs[mob];
 		}
 
 		var index = ++$.world.mobcnt;
 		var mob = new Mob({
 			id : index,
 			tag : '#enemy' + index,
-			tplId : index,
+			tplId : tpl.id,
 			name : tpl.name,
 			type : tpl.type,
 		});
@@ -534,7 +578,7 @@ var World = klass(function(data) {
 			exp : Math.ceil(tpl.reward.exp * $.world.level),
 		};
 
-		for (attr in tpl.attrs) {
+		for (var attr in tpl.attrs) {
 			var val = tpl.attrs[attr] * $.world.level;
 			var roll = getRandomInt(val-val/10, val+val/10);
 			mob.setAttr(attr, roll);
@@ -544,7 +588,7 @@ var World = klass(function(data) {
 	},
 
 	remCorpses : function() {
-		for (key in $.world.dead) {
+		for (var key in $.world.dead) {
 			$.world.dead[key].wipe();
 		}
 	},
@@ -618,12 +662,12 @@ var Mob = klass(function(data) {
 			found = $(str, this.tag);
 		}
 
-		if (!found || found.length == 0) {
-			return found;
+		if (found.length == 0) {
+			return $('');
 		}
 
-		this.nodes[str] = found;
-		return found;
+		this.nodes[str] = $(found[0]);
+		return this.nodes[str];
 	},
 
 	resetNode : function() {
@@ -638,7 +682,7 @@ var Mob = klass(function(data) {
 	},
 
 	spawn : function() {
-		$tr = $('<tr>');
+		var $tr = $('<tr>');
 		$tr.addClass('enemyrow');
 		$tr.attr('id', 'enemy'+this.id);
 		$tr.attr('enemyid', this.id);
@@ -646,8 +690,8 @@ var Mob = klass(function(data) {
 		$tr.append(sprintf('<td><div class=target>%s</div></td>', $btn));
 		$tr.append(sprintf('<td><div class=num>%s</div></td>', this.id));
 		$tr.append(sprintf('<td><div class=type>%s</div></td>', this.type));
-		$tr.append(sprintf('<td><div class=level>%s</div></td>', this.level));
-		$tr.append(sprintf('<td><div class=ap>%.2f/%.2f</div></td>', this.dmgMin, this.dmgMax));
+		// $tr.append(sprintf('<td><div class=level>%s</div></td>', this.level));
+		// $tr.append(sprintf('<td><div class=ap>%.2f/%.2f</div></td>', this.dmgMin, this.dmgMax));
 		$tr.append(sprintf('<td><div class=hp>%d/%d</div></td>', this.hp, this.hpMax));
 		$tr.append(sprintf('<td><div class=name>%s</div></td>', this.name));
 		$('#enemylist').prepend($tr);
@@ -697,7 +741,7 @@ var Mob = klass(function(data) {
 	hit : function() {
 		var crit = this.crit >= getRandomFloat(0,100) ? 2 : 1;
 		return {
-			damage: getRandomInt(this.dmgMin, this.dmgMax) * crit,
+			damage: getRandomFloat(this.dmgMin, this.dmgMax) * crit,
 			crit : crit,
 		}
 	},
@@ -786,13 +830,21 @@ var Mob = klass(function(data) {
 	onHit : function(enemy, hit) {
 		this.hp = Math.max(0, this.hp - hit.damage);
 
-		this.getNode('.hp').finish().filter(':not(:animated)').effect("highlight", { color : 'red' }, 1000/enemy.aspd);
+		var hpNode = this.getNode('.hp');
+		hpNode.finish().filter(':not(:animated)').effect("highlight", { color : 'red' }, 1000/enemy.aspd);
 		var critText = '';
 		if (hit.crit && hit.crit>1) {
 		 	critText = ' (крит!)';
 		}
 		$.world.log("<b>%s</b> атаковал <b>%s</b> на %.2f урона %s", enemy.getName(), this.getName(), hit.damage, critText);
 		this.redraw();
+
+		if (hit.crit && hit.crit>1) {
+			// для критов помедленнее и пожирнее
+			DamagePop.show(hpNode.offset(), sprintf("-%.2f", hit.damage), { color: "red", 'font-weight': 'bold' }, 0.5);
+		} else {
+			DamagePop.show(hpNode.offset(), sprintf("-%.2f", hit.damage), { color: "red" }, 1.0);
+		}
 
 		if (this.hp < 1) {
 			this.onDead(enemy, hit);
@@ -813,7 +865,86 @@ var Mob = klass(function(data) {
 		$(this.tag).remove();
 	},
 
-	onDead : function() {
+	rollLoot : function(enemy) {
+		// некоторые мобы могли бы роллить лут особы способом
+
+		var tpl = $.deploy.mobs[this.tplId]
+		if (!tpl || !tpl.loot) {
+			return;
+		}
+
+		// подсчитать шанс
+		var total = 0;
+		var chance = {};
+		for (var i in tpl.loot) {
+			var pos = tpl.loot[i];
+			for (var quality in pos.chance) {
+				var cnt = pos.chance[quality];
+				chance[quality] = (chance[quality]?chance[quality]:0) + cnt;
+				total += cnt;
+			}
+		}
+
+		// будет ли выдан предмет
+		var roll = getRandomFloat(0, Math.max(100, total));
+		if (roll>total) {
+			return;
+		}
+
+		var level = this.level;
+
+		var c = 0;
+		var found = null;
+		for (var key in tpl.loot) {
+			var pos = tpl.loot[key];
+			for (var quality in pos.chance) {
+				c += pos.chance[quality];
+				if (c>=roll) {
+					var q = $.deploy.quality[quality];
+					var q = q?q:{};
+					var cnt = 1;
+					if ( typeof pos.cnt == 'object') {
+						cnt = getRandomInt(pos.cnt[0], pos.cnt[1]);
+					} else if ( typeof pos.cnt == 'number') {
+						cnt = pos.cnt;
+					}
+
+					var item = $.deploy.items[pos.itemId];
+					if (!item) {
+						console.log('не найден предмет ', pos)
+						return;
+					}
+
+					var stats = null;
+					if (item.stats) {
+						stats = {}
+						for (var p in item.stats) {
+							var scale = item.stats[p];
+							stats[p] = Math.floor(scale * this.level);
+						}
+					}
+
+					var scale = q.scale?q.scale:1;
+					found = new Item({
+						tplId : pos.itemId,
+						quality : quality,
+						scale : 1,
+						name : item.name, // сгенерировать имя
+						cnt : cnt,
+						stats : stats,
+					});
+					break;
+				}
+			}
+			if (found) {
+				break;
+			}
+		}
+
+		return found;
+	},
+
+	onDead : function(enemy, hit) {
 		$.world.log('Побеждён %s %d уровня, награда %d опыта и %d золота', this.getName(), this.level, this.reward.exp, this.reward.gold);
 		this.getNode().addClass('deadenemy');
 		this.hp = 0;
@@ -830,9 +961,208 @@ var Mob = klass(function(data) {
     // walk: function () {}
 });
 
+var DamagePop = klass(function() {
+})
+.statics({
+	enable : 1,
+	poolSize : 10,
+	pool : [],
+
+	pushCell : function() {
+		var $cell = $('<div class=dmgpop done=1></div>')
+		Array.push(DamagePop.pool, $cell);
+		return $cell;
+	},
+
+	getCell : function() {
+		for (var i = 0; i < DamagePop.poolSize - DamagePop.pool.length; ++i) {
+			DamagePop.pushCell();
+		}
+
+		for (var key in DamagePop.pool) {
+			var c = DamagePop.pool[key];
+			if (c && c.attr('done') == 1) {
+				return c;
+			}
+		}
+	},
+
+	show : function(at, text, css, speed) {
+		var $cell = DamagePop.getCell();
+		if (!$cell || !DamagePop.enable) {
+			return;
+		}
+
+		$cell
+			.stop()
+			.detach()
+			.attr('done', 0)
+			.text(text);
+
+		if (css) {
+			$cell.css(css);
+		}
+		$cell
+			.css({
+				position: 'absolute',
+				left : at.left,
+				top: at.top,
+				display: 'block',
+				visibility: 'visible',
+				opacity: 1.0,
+			})
+			.appendTo('body')
+			.animate({
+				top: "-=15px",
+				opacity: "1.0",
+			}, 400/speed)
+			.animate({
+				top: "-=15px",
+				opacity: "0.0",
+			}, 1200/speed, 'swing', function() {
+				$(this).attr('done', 1);
+			});
+	}
+});
+
+var Item = klass(function(data) {
+	$.extend(this, data)
+	this.node = null;
+})
+.statics({
+	hover : false,
+})
+.methods({
+	getTag : function() {
+		return 'item-'+this.id;
+	},
+
+	getNode : function() {
+		if (this.node) {
+			return this.node;
+		}
+
+		this.node = $('#'+this.getTag())[0];
+		return this.node;
+	},
+
+	render : function() {
+		var tag = this.getTag();
+		var $tr = $(sprintf('<tr class="item" id="%s"></tr>', tag));
+		$tr.attr('num', this.id);
+		$tr.attr('using', 0);
+
+
+		$tr.append('<td width="1%"><button class="wear btn btn-xs btn-default">+</button></td>');
+		$tr.append('<td>#<span class="number">0</span></td>');
+		$tr.append('<td><span class="name"></span></td>');
+		$tr.append('<td><span class="descr">Описание</span></td>'); //TODO
+		$tr.append('<td><button class="use btn btn-xs btn-default">Использовать</button></td>');
+		return $tr;
+	},
+
+	redraw : function() {
+		var node = this.getNode();
+		if (!node) {
+			node = this.render();
+			this.bind(node);
+			$('#inventory').append(node);
+		}
+
+		if (!node) {
+			console.log('проблема с рендером предмета')
+			return;
+		}
+
+		$('.equiped', node).attr('checked', this.equiped?'checked':'');
+		$('.number', node).text(this.id);
+		$('.name', node).text(this.getName());
+		$('.damage', node).text(this.damage);
+		$('.cnt', node).text(this.cnt);
+		// $('.use').unbind('click').click(this.use.bind(this));
+	},
+
+	getName : function() {
+		return this.name; //TODO
+	},
+
+	use : function(event) {
+		// type : 'Топор'
+		// this == window
+	},
+
+	hoverShow : function(e) {
+		var player = $.world.player;
+		var $hover = this.getItemHover();
+		$('.name', $hover).text(this.name)
+		$('.dmg', $hover).text(this.stats.damage)
+		$('.str', $hover).text(this.stats.str);
+		$('.vit', $hover).text(this.stats.vit);
+		$('.agi', $hover).text(this.stats.agi);
+		$('.lak', $hover).text(this.stats.lak);
+		$('.mst', $hover).text(this.stats.mst);
+
+		$hover.show().css({'left' : e.pageX, 'top' : e.pageY});
+	},
+
+	hoverHide : function(e) {
+		var $hover = this.getItemHover();
+		$hover.hide().css({'left': e.pageX, 'top': e.pageY});
+	},
+
+	hoverMove : function(e) {
+		var $hover = this.getItemHover();
+		$hover.css({'left': e.pageX, 'top': e.pageY});
+	},
+
+	bind : function($node) {
+		var $node = $node || $(this.getNode());
+		$node.mouseenter(this.hoverShow.bind(this));
+		$node.mouseleave(this.hoverHide.bind(this));
+		$node.mousemove(this.hoverMove.bind(this));
+	},
+
+	getItemHover : function() {
+		if (Item.hover) {
+			return Item.hover;
+		}
+
+		// Создаём шаблон ховера
+		var $hover = $('<div id="itemHover" style="display:none;"></div>');
+		var $name = $('<div>Название: <span class=name>Name</span></div>')
+		var $attack = $('<div>Урон: <span class=dmg>0</span></div>')
+		var $def = $('<div>Защита: <span class=def>0</span></div>')
+		var $quality = $('<div>Качество: <span class=quality>normal</span></div>')
+
+		var $stats = $('<table class="itemStats"></table>');
+		$stats.append('<tr><td colspan=99>Статы: </td></tr>');
+		$stats.append('<tr><td>str: </td><td class="str">0</td></tr>');
+		$stats.append('<tr><td>vit: </td><td class="vit">0</td></tr>');
+		$stats.append('<tr><td>agi: </td><td class="agi">0</td></tr>');
+		$stats.append('<tr><td>lak: </td><td class="lak">0</td></tr>');
+		$stats.append('<tr><td>mst: </td><td class="mst">0</td></tr>');
+
+		$hover.append($name);
+		$hover.append($quality);
+		$hover.append($attack);
+		$hover.append($def);
+		$hover.append($stats);
+		$hover.appendTo('body');
+
+		Item.hover = $hover;
+		return Item.hover;
+	},
+
+	onUpdate : function() {
+		//TODO expire
+	},
+});
+
 var Player = Mob.extend(function(data) {
 	this.factor = 1;
 	this.resurectTimeout = 15*1000;// 15 sec
+	this.itemCnt = 0;
+	this.items = [];
 	$.extend(this, data);
 })
 .methods({
@@ -841,7 +1171,12 @@ var Player = Mob.extend(function(data) {
 		this.reset();
 		$.extend(this, data);
 		this.nodes = {};
+		for (var key in this.items) {
+			var item = this.items[key]
+			this.items[key] = new Item(item)
+		}
 		this.recalc();
+		this.reinitInventory();
 	},
 
 	bind : function () {
@@ -869,6 +1204,8 @@ var Player = Mob.extend(function(data) {
 		$('#resurect').unbind("click").click(function(e) {
 			self.resurect();
 		});
+
+		// TODO забиндить ховер
 	},
 
 	getName : function(gender, tens) {
@@ -921,7 +1258,7 @@ var Player = Mob.extend(function(data) {
 
 	rollEnemy : function() {
 		var targets = 0;
-		for (key in $.world.enemys) {
+		for (var key in $.world.enemys) {
 			var enemy = $.world.enemys[key];
 			if (enemy.targeted) {
 				targets += 1;
@@ -931,7 +1268,7 @@ var Player = Mob.extend(function(data) {
 		if (targets > 0) {
 			var pos = getRandomInt(0, targets-1);
 			var i = 0;
-			for (key in $.world.enemys) {
+			for (var key in $.world.enemys) {
 				var enemy = $.world.enemys[key];
 				if (enemy.targeted) {
 					if (i == pos) {
@@ -944,7 +1281,7 @@ var Player = Mob.extend(function(data) {
 			var len = Object.keys($.world.enemys).length;
 			var pos = getRandomInt(0, len-1);
 			var i = 0;
-			for (key in $.world.enemys) {
+			for (var key in $.world.enemys) {
 				if (i == pos) {
 					return $.world.enemys[key];
 				}
@@ -960,7 +1297,7 @@ var Player = Mob.extend(function(data) {
 		this.getNode('.skillPoints').text(this.skillPoints);
 		this.getNode('.hp').text(sprintf("%d/%d", this.hp, this.hpMax));
 		this.getNode('.hpregen').text(sprintf("%.2f в сек", this.hpRegen*2));
-		this.getNode('.name').val(this.name);
+		// this.getNode('.name').val(this.name);
 		this.getNode('.atmin').text(sprintf("%.2f", this.dmgMin));
 		this.getNode('.atmax').text(sprintf("%.2f", this.dmgMax));
 		this.getNode('.aspd').text(sprintf("%.2f", this.aspd));
@@ -975,12 +1312,100 @@ var Player = Mob.extend(function(data) {
 		this.getNode('[attr=lak] > .val').text(this.lak);
 		this.getNode('[attr=mst] > .val').text(this.mst);
 
+		$('#loot-cnt').text(this.getItemCnt());
+
 		if (this.hp < 1) {
 			$('#resurect').css('display', 'block');
 			$('#resurectTime').css('display', 'block');
 		} else {
 			$('#resurect').css('display', 'none');
 			$('#resurectTime').css('display', 'none');
+		}
+	},
+
+	getItemCnt : function() {
+		return this.items.length;
+	},
+
+	sortInventory : function() {
+		var $table = $('#inventory');
+		var $tbody = $table.find('tbody');
+
+		$tbody.find('tr').sort(function(a, b) {
+			// XXX return $('td:first', b).text().localeCompare($('td:first', a).text());
+			var ua = parseInt($(a).attr('using'));
+			var ub = parseInt($(b).attr('using'));
+			if ( ua != ub ) {
+				return ua < ub;
+			} else {
+				var na = parseInt($(a).attr('num'));
+				var nb = parseInt($(b).attr('num'));
+				return na < nb;
+			}
+		}).appendTo($tbody);
+	},
+
+	reinitInventory : function() {
+		$('#inventory > tbody').empty();
+		//TODO sortable, custom sort
+		this.redrawInventory();
+	},
+
+	redrawInventory : function() {
+		//TODO убрать ховер
+
+		// перерисовка каждого предмета
+		$.each(this.items, function(k,v) {
+			v.redraw();
+		});
+
+		// сортировка
+		this.sortInventory();
+	},
+
+	addItem : function(item) {
+		var tpl = $.deploy.items[item.tplId]
+		if (tpl && tpl.stacked) {
+			var found = this.findItemByTpl(item.tplId)
+			if (found) {
+				found.cnt += item.cnt;
+				found.redraw();
+				return found;
+			}
+		}
+
+		item.id = ++this.itemCnt;
+		Array.prototype.push.call(this.items, item);
+		item.redraw();
+		this.sortInventory();
+		return item;
+	},
+
+	remItem : function(id) {
+		for (var key in this.items) {
+			var item = this.items[key];
+			if (item.id == id) {
+				this.items.splice(key,1)
+				return true;
+			}
+		}
+	},
+
+	findItemById : function(id) {
+		for(var key in this.items) {
+			var item = this.items[key];
+			if (item.id === id ) {
+				return item;
+			}
+		}
+	},
+
+	findItemByTpl : function(tplId) {
+		for(var key in this.items) {
+			var item = this.items[key];
+			if (item.tplId === tplId) {
+				return item;
+			}
 		}
 	},
 
@@ -1002,6 +1427,10 @@ var Player = Mob.extend(function(data) {
 		this.tryResurect();
 		this.regen();
 		this.attack();
+
+		$.each(this.items, function(k,v) {
+			v.onUpdate();
+		});
 	},
 
 	onSpawn : function() {
@@ -1019,6 +1448,20 @@ var Player = Mob.extend(function(data) {
 			}
 		}
 		this.kills += 1;
+
+		var loot = enemy.rollLoot(this);
+		if (loot) {
+			var item = this.addItem(loot);
+
+			// написать в лог,
+			var q = $.deploy.quality[item.quality];
+			var qtitle = !q? '' : sprintf(' качества %s', q.name);
+			$.world.log('Получен предмет %s%s - %d шт', item.name, qtitle, loot.cnt);
+
+			// обновить инвентарь
+			this.redrawInventory();
+		}
+
 		this.redraw()
 	},
 
@@ -1034,25 +1477,27 @@ var Player = Mob.extend(function(data) {
 		this.redraw();
 
 		// убрать всех врагов, иначе почему ты сдох хм?
-		for (key in $.world.enemys) {
-			$.world.enemys[key].wipe();
-		}
-		for (key in $.world.dead) {
-			$.world.dead[key].wipe();
-		}
+		$.each($.world.enemys, function(k,v) {
+			v.wipe();
+		});
+		$.each($.world.dead, function(k,v) {
+			v.wipe();
+		});
 		$.world.save();
 	},
 });
 
 $(document).ready(function() {
+	$('#tabs').tab();
 	$.world = new World({});
+	$.world.start();
 	$.world.loop();
 });
 </script>
 </head>
 <body>
 <div class="row clearfix">
-	<div class="col-md-2 column ui-sortable">
+	<div class="col-md-2 column">
 		<h4>Игрок</h4>
 		<ul id=player>
 			<!--
@@ -1070,7 +1515,7 @@ $(document).ready(function() {
 				<div class="exp"> </div>
 			</li>
 			<li>
-				<cap>Деньги : </cap>
+				<cap>Деньги: </cap>
 				<div class="gold"> </div>
 			</li>
 			<hr />
@@ -1095,6 +1540,7 @@ $(document).ready(function() {
 				<tr attr="str">
 					<td><cap>Стр:</cap></td>
 					<td class="val">1</td>
+					<td class="valadd"></td>
 					<td>&nbsp;</td>
 					<td><input type=button value="+" class="btn btn-primary btn-xs add" /></td>
 					<td><input type=button value="-" class="btn btn-warning btn-xs rem" /></td>
@@ -1102,6 +1548,7 @@ $(document).ready(function() {
 				<tr attr="vit">
 					<td><cap>Вит:</cap></td>
 					<td class="val">1</td>
+					<td class="valadd"></td>
 					<td>&nbsp;</td>
 					<td><input type=button value="+" class="btn btn-primary btn-xs add" /></td>
 					<td><input type=button value="-" class="btn btn-warning btn-xs rem" /></td>
@@ -1109,6 +1556,7 @@ $(document).ready(function() {
 				<tr attr="agi">
 					<td><cap>Аги:</cap></td>
 					<td class="val">1</td>
+					<td class="valadd"></td>
 					<td>&nbsp;</td>
 					<td><input type=button value="+" class="btn btn-primary btn-xs add" /></td>
 					<td><input type=button value="-" class="btn btn-warning btn-xs rem" /></td>
@@ -1116,6 +1564,7 @@ $(document).ready(function() {
 				<tr attr="lak">
 					<td><cap>Лак:</cap></td>
 					<td class="val">1</td>
+					<td class="valadd"></td>
 					<td>&nbsp;</td>
 					<td><input type=button value="+" class="btn btn-primary btn-xs add" /></td>
 					<td><input type=button value="-" class="btn btn-warning btn-xs rem" /></td>
@@ -1123,6 +1572,7 @@ $(document).ready(function() {
 				<tr attr="mst">
 					<td><cap>Мст:</cap></td>
 					<td class="val">1</td>
+					<td class="valadd"></td>
 					<td>&nbsp;</td>
 					<td><input type=button value="+" class="btn btn-primary btn-xs add" /></td>
 					<td><input type=button value="-" class="btn btn-warning btn-xs rem" /></td>
@@ -1157,6 +1607,9 @@ $(document).ready(function() {
 			</li>
 			<hr />
 			<li>
+				<button id="pause" class="btn btn-xs btn-info">Пауза</button>
+			</li>
+			<li>
 				<button id="resurect" class="btn btn-xs btn-primary" style="display:none;">Воскресить</button>
 			</li>
 			<li>
@@ -1167,14 +1620,27 @@ $(document).ready(function() {
 			</li>
 		</ul>
 
-		<center><h6>Blah v 0.014</h6></center>
+		<center><h6>Blah v 0.015</h6></center>
 	</div>
-	<div class="col-md-6 column ui-sortable">
-		<h4>События</h4>
-		<table id=loglist class="table table-striped table-hover ">
-		</table>
+	<div class="col-md-4 column">
+		<ul id="tabs" class="nav nav-tabs" data-tabs="tabs">
+			<li class="active"><a id="link-log" href="#tab-log" data-toggle="tab">События</a></li>
+			<li><a id="link-loot" href="#tab-loot" data-toggle="tab">Добыча&nbsp;(<span id="loot-cnt">0</span>)</a></li>
+		</ul>
+		<div id="tab-content" class="tab-content">
+			<div class="tab-pane active" id="tab-log">
+				<table id=loglist class="table table-striped table-hover ">
+					<!-- log -->
+				</table>
+			</div>
+			<div class="tab-pane" id="tab-loot">
+				<table id=inventory class="table table-hover ">
+					<!-- items -->
+				</table>
+			</div>
+		</div>
 	</div>
-	<div class="col-md-4 column ui-sortable">
+	<div class="col-md-3 column">
 		<h4>Уровень подземелья (LVL: <span id="worldlevel">1</span>)
 			<button class="btn btn-primary btn-xs" id=addenemylvl>+</button>
 			<button class="btn btn-warning btn-xs" id=remenemylvl>-</button>
@@ -1191,14 +1657,19 @@ $(document).ready(function() {
 				<th class="target"></th>
 				<th class="num">#</th>
 				<th class="type">тип</th>
-				<th class="level">уровень</th>
-				<th class="ap">атака</th>
+				<!-- <th class="level">уровень</th> -->
+				<!-- <th class="ap">атака</th> -->
 				<th class="hp">жизни</th>
 				<th class="name">имя</th>
 			</tr>
 			</thead>
  		</table>
 	</div>
+	<div class="col-md-3 column">
+	<!-- монстрятники  -->
+	</div>
+</div>
+<div id=footer>
 </div>
 </body>
 </html>
